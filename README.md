@@ -1,184 +1,94 @@
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=bugs)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=coverage)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
-[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_open-source-polarion-docker-repo-template)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_bulk-processing-service&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_bulk-processing-service)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_bulk-processing-service&metric=bugs)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_bulk-processing-service)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_bulk-processing-service&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_bulk-processing-service)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=SchweizerischeBundesbahnen_bulk-processing-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=SchweizerischeBundesbahnen_bulk-processing-service)
 
-# <<docker-image-name>> Service
+# Bulk Processing Service
 
-<< Short Description >>
+Bulk PDF export service for Polarion PDF Exporter. Accepts HTML documents, converts them to PDF via WeasyPrint, and merges into a single output file with optional cover pages.
 
-## Features
-
-<< List of features >>
-
-## Getting Started
-
-### Installation
-
-To install the latest version of the <<docker-image-name>> Service, run the following command:
-
-```bash
-docker pull ghcr.io/schweizerischebundesbahnen/<<docker-image-name>>:latest
-```
-
-### Running the Service
-
-To start the <<docker-image-name>> service container, execute:
-
-```bash
-  docker run --detach \
-    --init \
-    --publish <<port>>:<<port>> \
-    --name <<docker-image-name>> \
-    ghcr.io/schweizerischebundesbahnen/<<docker-image-name>>:latest
-```
-
-The service will be accessible on port <<port>>.
-
-> **Important**: The `--init` flag enables Docker's built-in init process which handles signal forwarding and zombie process reaping. This is required for proper operation of the service.
-
-### Logging Configuration
-
-The service includes a robust logging system with the following features:
-
-- Log files are stored in `/opt/<<docker-image-name>>/logs` directory
-- Log level can be configured via `LOG_LEVEL` environment variable (default: INFO)
-- Log format: `timestamp - logger name - log level - message`
-- Each service start creates a new timestamped log file
-
-To customize logging when running the container:
+## Running the Service
 
 ```bash
 docker run --detach \
-  --init \
-  --publish <<port>>:<<port>> \
-  --name <<docker-image-name>> \
-  --env LOG_LEVEL=DEBUG \
-  --volume /path/to/local/logs:/opt/<<docker-image-name>>/logs \
-  ghcr.io/schweizerischebundesbahnen/<<docker-image-name>>:latest
+  --publish 9070:9070 \
+  --name bulk-processing-service \
+  ghcr.io/schweizerischebundesbahnen/bulk-processing-service:latest
 ```
 
-Available log levels:
+## Configuration
 
-- DEBUG: Detailed information for debugging
-- INFO: General operational information (default)
-- WARNING: Warning messages for potential issues
-- ERROR: Error messages for failed operations
-- CRITICAL: Critical issues that require immediate attention
+| Environment Variable | Default | Description |
+|---|---|---|
+| `WEASYPRINT_SERVICE_URL` | — | URL of the WeasyPrint service (e.g. `http://weasyprint-service:9080`). If not set, uses the URL from the job start request, falling back to `http://localhost:9080` |
+| `WEASYPRINT_TIMEOUT` | `300` | Timeout in seconds for WeasyPrint HTTP requests |
+| `JOB_STORAGE_DIR` | `/data/jobs` | Directory for storing job data (metadata, PDFs, results) |
+| `JOB_TTL` | `3h` | Time-to-live for completed jobs before cleanup. Supports `h` (hours), `m` (minutes), `s` (seconds) |
+| `DEBUG_DIR` | — | If set, saves incoming HTML and converted PDFs to this directory for debugging |
+| `PORT` | `9070` | HTTP port |
 
-### Using as a Base Image
+## Persistent Storage
 
-To extend or customize the service, use it as a base image in the Dockerfile:
+By default, job data is stored inside the container at `/data/jobs` and is lost when the container is removed.
 
-```Dockerfile
-FROM ghcr.io/schweizerischebundesbahnen/<<docker-image-name>>:latest
-```
-
-### Using Docker Compose
-
-To run the service using Docker Compose:
+To persist job data across container restarts or share it between multiple service instances, mount an external volume:
 
 ```bash
-docker-compose up -d
+docker run --detach \
+  --publish 9070:9070 \
+  --name bulk-processing-service \
+  --volume /path/on/host:/data/jobs \
+  --env WEASYPRINT_SERVICE_URL=http://weasyprint-service:9080 \
+  ghcr.io/schweizerischebundesbahnen/bulk-processing-service:latest
 ```
 
-The Docker Compose configuration includes the `init: true` parameter which enables proper process management for the container.
+When using a shared volume, file-level locking (`fcntl.flock`) ensures safe concurrent access from multiple service instances. The filesystem must be POSIX-compliant (local disk, NFS v4).
+
+## API
+
+### Call Sequence
+
+```
+start → add / add-with-cover (1..N times) → stop
+```
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/convert/start` | Create a new merge job. Accepts `MergeJobStartParams` JSON, returns job ID |
+| POST | `/api/convert/{jobId}/add` | Add a document (raw HTML body, `Content-Type: text/html`) |
+| POST | `/api/convert/{jobId}/add-with-cover` | Add a document with cover page (`{"html": "...", "coverPageHtml": "..."}`) |
+| POST | `/api/convert/{jobId}/stop` | Merge all documents and return the resulting PDF |
+
+### Job Lifecycle
+
+- **start** creates a job, returns a 32-character hex job ID
+- **add / add-with-cover** sends HTML to WeasyPrint for conversion, stores the resulting PDF on disk. Call order defines page order in the final PDF
+- **stop** merges all PDFs into one, stores the result, marks the job as completed, and returns the merged PDF. The job data remains on disk until TTL-based cleanup removes it
+
+### TTL Cleanup
+
+A background task periodically scans job storage and removes:
+- Completed jobs older than `JOB_TTL`
+- Stuck active jobs older than `2 × JOB_TTL` (safety net)
 
 ## Development
 
-### Building the Docker Image
-
-To build the Docker image from the source with a custom version, use:
+### Building
 
 ```bash
-  docker build \
-    --build-arg APP_IMAGE_VERSION=0.0.0 \
-    --file Dockerfile \
-    --tag <<docker-image-name>>:0.0.0 .
-```
-
-Replace 0.0.0 with the desired version number.
-
-### Running the Development Container
-
-To start the Docker container with your custom-built image:
-
-```bash
-  docker run --detach \
-    --init \
-    --publish 9080:9080 \
-    --name <<docker-container-name>> \
-    <<docker-image-name>>:0.0.0
-```
-
-### Stopping the Container
-
-To stop the running container, execute:
-
-```bash
-  docker container stop <<docker-container-name>>
+docker build \
+  --build-arg APP_IMAGE_VERSION=0.0.0 \
+  --tag bulk-processing-service:0.0.0 .
 ```
 
 ### Testing
-
-#### container-structure-test
-
-The container-structure-test tool is used to verify that the Docker image meets expected standards and specifications. It validates the container structure, ensuring proper file paths, permissions, and commands are available, which helps maintain consistency and reliability of the containerized application.
-
-Before running the following command, ensure that the `container-structure-test` tool is installed. You can find installation instructions in the [official documentation](https://github.com/GoogleContainerTools/container-structure-test).
-
-```bash
-container-structure-test test --image <<docker-container-name>>:0.0.0 --config ./tests/container/container-structure-test.yaml
-```
-
-#### grype
-
-Grype is used for vulnerability scanning of the Docker image. This tool helps identify known security vulnerabilities in the dependencies and packages included in the container, ensuring the deployed application meets security standards and doesn't contain known exploitable components.
-
-To scan the Docker image for vulnerabilities, you can use Grype. First, ensure that Grype is installed by following the [installation instructions](https://github.com/anchore/grype#installation).
-
-Then run the vulnerability scan on your image:
-
-```bash
-grype <<docker-container-name>>:0.0.0
-```
-
-#### tox
-
-Tox automates testing in different Python environments, ensuring that the application works correctly across various Python versions and configurations. It helps maintain compatibility and provides a standardized way to run test suites, formatting checks, and other quality assurance processes.
 
 ```bash
 uv run tox
 ```
 
-#### pytest (for debugging)
+### REST API Documentation
 
-Pytest is used for unit and integration testing of the application code. These tests verify that individual components and the entire application function correctly according to specifications. Running pytest during development helps catch bugs early and ensures code quality.
-
-```bash
-# all tests
-uv run pytest
-```
-
-```bash
-# a specific test
-uv run pytest tests/test_app.py -v
-```
-
-#### pre-commit
-
-Pre-commit hooks run automated checks on code before it's committed to the repository. This ensures consistent code style, formatting, and quality across the project. It helps catch common issues early in the development process, maintaining high code standards and reducing the need for style-related revisions during code reviews.
-
-```bash
-uv run pre-commit run --all
-```
-
-### REST API
-
-This service provides REST API. OpenAPI Specification can be obtained [here](app/static/openapi.json).
+Interactive API docs available at `/docs` when the service is running.

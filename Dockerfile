@@ -19,5 +19,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
 ENV PATH="${WORKING_DIR}/.venv/bin:${PATH}"
+ENV JOB_STORAGE_DIR=/data/jobs
+ENV JOB_TTL=3h
 
 ENTRYPOINT [ "python", "-m", "app.app" ]
