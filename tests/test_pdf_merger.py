@@ -5,7 +5,7 @@ import io
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from app.pdf_merger import merge_pdfs, replace_first_page_with_cover
+from app.pdf_merger import count_pdf_pages, merge_pdfs, replace_first_page_with_cover, resolve_cover_page_placeholders
 
 
 def _add_text_to_page(writer: PdfWriter, page_index: int, text: str) -> None:
@@ -135,3 +135,30 @@ class TestReplaceFirstPageWithCover:
         reader = PdfReader(io.BytesIO(result))
         # 1 cover page + 1 content page = 2 pages
         assert len(reader.pages) == 2
+
+
+class TestCountPdfPages:
+    def test_single_page(self):
+        pdf = create_test_pdf()
+        assert count_pdf_pages(pdf) == 1
+
+    def test_multi_page(self):
+        pdf = create_pdf_with_placeholder()  # 2 pages
+        assert count_pdf_pages(pdf) == 2
+
+
+class TestResolveCoverPagePlaceholders:
+    def test_replaces_both_placeholders(self):
+        html = "<html>Page {{ PAGE_NUMBER }} of {{ PAGES_TOTAL_COUNT }}</html>"
+        result = resolve_cover_page_placeholders(html, 42)
+        assert result == "<html>Page 1 of 42</html>"
+
+    def test_handles_flexible_whitespace(self):
+        html = "{{PAGE_NUMBER}} / {{  PAGES_TOTAL_COUNT  }}"
+        result = resolve_cover_page_placeholders(html, 10)
+        assert result == "1 / 10"
+
+    def test_no_placeholders(self):
+        html = "<html>No placeholders here</html>"
+        result = resolve_cover_page_placeholders(html, 5)
+        assert result == html

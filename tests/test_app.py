@@ -139,8 +139,9 @@ class TestAddDocumentToJob:
 
 class TestAddDocumentWithCoverToJob:
     @patch("app.converter_controller.replace_first_page_with_cover")
+    @patch("app.converter_controller.count_pdf_pages", return_value=5)
     @patch("app.converter_controller.get_weasyprint_client")
-    def test_add_with_cover_success(self, mock_get_client, mock_replace, client):
+    def test_add_with_cover_success(self, mock_get_client, mock_count_pages, mock_replace, client):
         mock_client = mock_get_client.return_value
         mock_client.convert_html_to_pdf.side_effect = [b"content_pdf", b"cover_pdf"]
         mock_replace.return_value = b"merged_with_cover"
@@ -150,9 +151,11 @@ class TestAddDocumentWithCoverToJob:
 
         response = client.post(
             f"/api/convert/{job_id}/add-with-cover",
-            json={"html": "<html>content</html>", "coverPageHtml": "<html>cover</html>"},
+            json={"html": "<html>content</html>", "coverPageHtml": "<html>{{ PAGE_NUMBER }} of {{ PAGES_TOTAL_COUNT }}</html>"},
         )
         assert response.status_code == 202
+        assert mock_client.convert_html_to_pdf.call_count == 2
+        mock_count_pages.assert_called_once_with(b"content_pdf")
         mock_replace.assert_called_once_with(b"content_pdf", b"cover_pdf")
 
         metadata = app_module.job_manager.get_job_metadata(job_id)

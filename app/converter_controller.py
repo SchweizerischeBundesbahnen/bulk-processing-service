@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.models import AddDocumentWithCoverRequest, MergeJobStartParams  # noqa: TC001
-from app.pdf_merger import replace_first_page_with_cover
+from app.pdf_merger import count_pdf_pages, replace_first_page_with_cover, resolve_cover_page_placeholders
 from app.weasyprint_client import WeasyPrintClient
 
 if TYPE_CHECKING:
@@ -100,7 +100,9 @@ async def add_document_with_cover_to_job(job_id: str, body: AddDocumentWithCover
     client = get_weasyprint_client(metadata.params.weasy_print_service_url)
     try:
         content_pdf = client.convert_html_to_pdf(body.html, metadata.params)
-        cover_pdf = client.convert_html_to_pdf(body.cover_page_html, metadata.params)
+        page_count = count_pdf_pages(content_pdf)
+        cover_html = resolve_cover_page_placeholders(body.cover_page_html, page_count)
+        cover_pdf = client.convert_html_to_pdf(cover_html, metadata.params)
         pdf_data = replace_first_page_with_cover(content_pdf, cover_pdf)
     except Exception as e:
         logger.exception("Failed to convert HTML to PDF with cover page for job '%s'", job_id)
