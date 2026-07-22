@@ -225,3 +225,18 @@ class TestFinishMergeJob:
         assert metadata is not None
         assert metadata.status == JobStatus.COMPLETED
         assert app_module.job_manager.get_result_path(job_id) is not None
+
+
+class TestDeleteMergeJob:
+    def test_delete_active_job(self, client):
+        response = client.post("/api/convert/start", json={})
+        job_id = response.json()
+
+        response = client.delete(f"/api/convert/{job_id}")
+        assert response.status_code == 204
+
+        assert app_module.job_manager.get_job_metadata(job_id) is None
+
+    def test_delete_not_found(self, client):
+        response = client.delete("/api/convert/nonexistent")
+        assert response.status_code == 404

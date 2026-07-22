@@ -133,3 +133,12 @@ def finish_merge_job(job_id: str) -> Response:
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
     )
+
+
+@router.delete("/{job_id}", status_code=204)
+def delete_merge_job(job_id: str) -> None:
+    job_manager = _get_job_manager()
+    if job_manager.get_job_metadata(job_id) is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    job_manager.delete_job(job_id)
+    logger.info("Deleted merge job '%s'", job_id)
