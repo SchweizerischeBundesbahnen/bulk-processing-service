@@ -67,7 +67,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "defusedxml", specifier = "==0.7.1" },
-    { name = "fastapi", specifier = "==0.136.3" },
+    { name = "fastapi", specifier = "==0.139.2" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "pypdf", specifier = "==5.6.0" },
     { name = "uvicorn", specifier = "==0.46.0" },
