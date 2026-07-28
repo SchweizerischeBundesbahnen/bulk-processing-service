@@ -11,10 +11,11 @@ requires-python = ">=3.14,<3.15"
 
 dependencies = [
     "fastapi==0.139.2",
-    "uvicorn==0.46.0",
     "httpx==0.28.1",
     "pypdf==5.6.0",
     "defusedxml==0.7.1",
+    "uvicorn==0.51.0",
+    "requests==2.34.2",
 ]
 
 [project.urls]
@@ -23,15 +24,15 @@ Repository = "https://github.com/SchweizerischeBundesbahnen/bulk-processing-serv
 
 [dependency-groups]
 dev = [
-    "pre-commit==4.6.0",
-    "ruff==0.15.22",
+    "pre-commit==4.6.1",
+    "ruff==0.16.0",
     "mypy==1.20.2",
     "types-defusedxml==0.7.0.20250822",
 ]
 
 test = [
-    "tox==4.57.0",
-    "tox-uv==1.35.2",
+    "tox==4.58.0",
+    "tox-uv==1.36.0",
     # for debug source code for pytest --> see tox.ini section [testenv]
     "docker==7.2.0",
     "pytest==9.1.1",
