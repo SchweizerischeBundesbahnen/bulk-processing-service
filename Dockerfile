@@ -18,7 +18,10 @@ COPY ./app/ ${WORKING_DIR}/app/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
+RUN date -u +"%Y-%m-%dT%H:%M:%SZ" > .build_timestamp
+
 ENV PATH="${WORKING_DIR}/.venv/bin:${PATH}"
+ENV BULK_PROCESSING_SERVICE_VERSION=${APP_IMAGE_VERSION}
 ENV JOB_STORAGE_DIR=/data/jobs
 ENV JOB_TTL=3h
 

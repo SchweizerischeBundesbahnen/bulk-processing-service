@@ -32,14 +32,18 @@ async def cleanup_expired_jobs(job_manager: JobManager, ttl: timedelta, interval
     while True:
         await asyncio.sleep(interval)
         try:
-            now = datetime.now(UTC)
-            for metadata in job_manager.list_jobs():
-                age = now - metadata.created_at
-                if metadata.status == JobStatus.COMPLETED and age > ttl:
-                    job_manager.delete_job(metadata.job_id)
-                    logger.info("Cleaned up expired completed job '%s' (age: %s)", metadata.job_id, age)
-                elif metadata.status == JobStatus.ACTIVE and age > ttl * 2:
-                    job_manager.delete_job(metadata.job_id)
-                    logger.warning("Cleaned up stuck active job '%s' (age: %s)", metadata.job_id, age)
+            await asyncio.to_thread(_run_cleanup, job_manager, ttl)
         except Exception:
             logger.exception("Error during job cleanup")
+
+
+def _run_cleanup(job_manager: JobManager, ttl: timedelta) -> None:
+    now = datetime.now(UTC)
+    for metadata in job_manager.list_jobs():
+        age = now - metadata.created_at
+        if metadata.status == JobStatus.COMPLETED and age > ttl:
+            job_manager.delete_job(metadata.job_id)
+            logger.info("Cleaned up expired completed job '%s' (age: %s)", metadata.job_id, age)
+        elif metadata.status == JobStatus.ACTIVE and age > ttl * 2:
+            job_manager.delete_job(metadata.job_id)
+            logger.warning("Cleaned up stuck active job '%s' (age: %s)", metadata.job_id, age)

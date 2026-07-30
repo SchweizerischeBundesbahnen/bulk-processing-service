@@ -49,7 +49,7 @@ When using a shared volume, file-level locking (`fcntl.flock`) ensures safe conc
 ### Call Sequence
 
 ```
-start → add / add-with-cover (1..N times) → stop
+start → add (1..N times) → finish
 ```
 
 ### Endpoints
@@ -57,15 +57,17 @@ start → add / add-with-cover (1..N times) → stop
 | Method | Endpoint | Description |
 |---|---|---|
 | POST | `/api/convert/start` | Create a new merge job. Accepts `MergeJobStartParams` JSON, returns job ID |
-| POST | `/api/convert/{jobId}/add` | Add a document (raw HTML body, `Content-Type: text/html`) |
-| POST | `/api/convert/{jobId}/add-with-cover` | Add a document with cover page (`{"html": "...", "coverPageHtml": "..."}`) |
-| POST | `/api/convert/{jobId}/stop` | Merge all documents and return the resulting PDF |
+| POST | `/api/convert/{jobId}/add` | Add a document (`{"html": "...", "coverPageHtml": "..."}`, cover page is optional) |
+| POST | `/api/convert/{jobId}/finish` | Merge all documents and return the resulting PDF |
+| DELETE | `/api/convert/{jobId}` | Delete a job |
+| GET | `/health` | Health check |
+| GET | `/version` | Service version and API version |
 
 ### Job Lifecycle
 
 - **start** creates a job, returns a 32-character hex job ID
-- **add / add-with-cover** sends HTML to WeasyPrint for conversion, stores the resulting PDF on disk. Call order defines page order in the final PDF
-- **stop** merges all PDFs into one, stores the result, marks the job as completed, and returns the merged PDF. The job data remains on disk until TTL-based cleanup removes it
+- **add** sends HTML to WeasyPrint for conversion, stores the resulting PDF on disk. If `coverPageHtml` is provided, it replaces the placeholder first page with a rendered cover page. Call order defines page order in the final PDF
+- **finish** merges all PDFs into one, stores the result, marks the job as completed, and returns the merged PDF. The job data remains on disk until TTL-based cleanup removes it
 
 ### TTL Cleanup
 

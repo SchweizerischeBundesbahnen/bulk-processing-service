@@ -49,6 +49,17 @@ class TestHealth:
         assert response.json() == {"status": "ok"}
 
 
+class TestVersion:
+    def test_version_endpoint(self, client):
+        response = client.get("/version")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["apiVersion"] == 1
+        assert "python" in data
+        assert "bulkProcessingService" in data
+        assert "timestamp" in data
+
+
 class TestStartMergeJob:
     def test_start_job_returns_job_id(self, client):
         response = client.post("/api/convert/start", json={"fileName": "test.pdf"})
@@ -95,53 +106,25 @@ class TestStartMergeJob:
 
 class TestAddDocumentToJob:
     @patch("app.converter_controller.get_weasyprint_client")
-    def test_add_document_success(self, mock_get_client, client):
+    def test_add_document_without_cover(self, mock_get_client, client):
         mock_client = mock_get_client.return_value
         mock_client.convert_html_to_pdf.return_value = SAMPLE_PDF
 
         response = client.post("/api/convert/start", json={})
         job_id = response.json()
 
-        response = client.post(
-            f"/api/convert/{job_id}/add",
-            content="<html><body>Hello</body></html>",
-            headers={"Content-Type": "text/html"},
-        )
+        response = client.post(f"/api/convert/{job_id}/add", json={"html": "<html><body>Hello</body></html>"})
         assert response.status_code == 202
         assert response.json() == {"status": "accepted"}
 
         metadata = app_module.job_manager.get_job_metadata(job_id)
         assert metadata.pdf_count == 1
+        mock_client.convert_html_to_pdf.assert_called_once()
 
-    def test_add_document_job_not_found(self, client):
-        response = client.post(
-            "/api/convert/nonexistent/add",
-            content="<html></html>",
-            headers={"Content-Type": "text/html"},
-        )
-        assert response.status_code == 404
-
-    @patch("app.converter_controller.get_weasyprint_client")
-    def test_add_document_weasyprint_failure(self, mock_get_client, client):
-        mock_client = mock_get_client.return_value
-        mock_client.convert_html_to_pdf.side_effect = RuntimeError("Connection refused")
-
-        response = client.post("/api/convert/start", json={})
-        job_id = response.json()
-
-        response = client.post(
-            f"/api/convert/{job_id}/add",
-            content="<html></html>",
-            headers={"Content-Type": "text/html"},
-        )
-        assert response.status_code == 502
-
-
-class TestAddDocumentWithCoverToJob:
     @patch("app.converter_controller.replace_first_page_with_cover")
     @patch("app.converter_controller.count_pdf_pages", return_value=5)
     @patch("app.converter_controller.get_weasyprint_client")
-    def test_add_with_cover_success(self, mock_get_client, mock_count_pages, mock_replace, client):
+    def test_add_document_with_cover(self, mock_get_client, mock_count_pages, mock_replace, client):
         mock_client = mock_get_client.return_value
         mock_client.convert_html_to_pdf.side_effect = [b"content_pdf", b"cover_pdf"]
         mock_replace.return_value = b"merged_with_cover"
@@ -150,7 +133,7 @@ class TestAddDocumentWithCoverToJob:
         job_id = response.json()
 
         response = client.post(
-            f"/api/convert/{job_id}/add-with-cover",
+            f"/api/convert/{job_id}/add",
             json={"html": "<html>content</html>", "coverPageHtml": "<html>{{ PAGE_NUMBER }} of {{ PAGES_TOTAL_COUNT }}</html>"},
         )
         assert response.status_code == 202
@@ -161,25 +144,19 @@ class TestAddDocumentWithCoverToJob:
         metadata = app_module.job_manager.get_job_metadata(job_id)
         assert metadata.pdf_count == 1
 
-    def test_add_with_cover_job_not_found(self, client):
-        response = client.post(
-            "/api/convert/nonexistent/add-with-cover",
-            json={"html": "<html></html>", "coverPageHtml": "<html></html>"},
-        )
+    def test_add_document_job_not_found(self, client):
+        response = client.post("/api/convert/00000000000000000000000000000000/add", json={"html": "<html></html>"})
         assert response.status_code == 404
 
     @patch("app.converter_controller.get_weasyprint_client")
-    def test_add_with_cover_weasyprint_failure(self, mock_get_client, client):
+    def test_add_document_weasyprint_failure(self, mock_get_client, client):
         mock_client = mock_get_client.return_value
         mock_client.convert_html_to_pdf.side_effect = RuntimeError("Connection refused")
 
         response = client.post("/api/convert/start", json={})
         job_id = response.json()
 
-        response = client.post(
-            f"/api/convert/{job_id}/add-with-cover",
-            json={"html": "<html></html>", "coverPageHtml": "<html></html>"},
-        )
+        response = client.post(f"/api/convert/{job_id}/add", json={"html": "<html></html>"})
         assert response.status_code == 502
 
 
@@ -193,22 +170,22 @@ class TestFinishMergeJob:
         job_id = response.json()
 
         for _ in range(2):
-            client.post(f"/api/convert/{job_id}/add", content="<html></html>", headers={"Content-Type": "text/html"})
+            client.post(f"/api/convert/{job_id}/add", json={"html": "<html></html>"})
 
-        response = client.post(f"/api/convert/{job_id}/stop")
+        response = client.post(f"/api/convert/{job_id}/finish")
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
         assert response.headers["content-disposition"] == 'attachment; filename="result.pdf"'
 
     def test_finish_job_not_found(self, client):
-        response = client.post("/api/convert/nonexistent/stop")
+        response = client.post("/api/convert/00000000000000000000000000000000/finish")
         assert response.status_code == 404
 
     def test_finish_job_no_documents(self, client):
         response = client.post("/api/convert/start", json={})
         job_id = response.json()
 
-        response = client.post(f"/api/convert/{job_id}/stop")
+        response = client.post(f"/api/convert/{job_id}/finish")
         assert response.status_code == 400
 
     @patch("app.converter_controller.get_weasyprint_client")
@@ -218,8 +195,8 @@ class TestFinishMergeJob:
 
         response = client.post("/api/convert/start", json={})
         job_id = response.json()
-        client.post(f"/api/convert/{job_id}/add", content="<html></html>", headers={"Content-Type": "text/html"})
-        client.post(f"/api/convert/{job_id}/stop")
+        client.post(f"/api/convert/{job_id}/add", json={"html": "<html></html>"})
+        client.post(f"/api/convert/{job_id}/finish")
 
         metadata = app_module.job_manager.get_job_metadata(job_id)
         assert metadata is not None
@@ -238,5 +215,5 @@ class TestDeleteMergeJob:
         assert app_module.job_manager.get_job_metadata(job_id) is None
 
     def test_delete_not_found(self, client):
-        response = client.delete("/api/convert/nonexistent")
+        response = client.delete("/api/convert/00000000000000000000000000000000")
         assert response.status_code == 404

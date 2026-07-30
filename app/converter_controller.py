@@ -5,9 +5,9 @@ import os
 import pathlib
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Response
 
-from app.models import AddDocumentWithCoverRequest, MergeJobStartParams  # noqa: TC001
+from app.models import AddDocumentRequest, MergeJobStartParams  # noqa: TC001
 from app.pdf_merger import count_pdf_pages, replace_first_page_with_cover, resolve_cover_page_placeholders
 from app.weasyprint_client import WeasyPrintClient
 
@@ -60,33 +60,7 @@ def start_merge_job(params: MergeJobStartParams) -> str:
 
 
 @router.post("/{job_id}/add", status_code=202)
-async def add_document_to_job(job_id: str, request: Request) -> dict[str, str]:
-    job_manager = _get_job_manager()
-    metadata = job_manager.get_job_metadata(job_id)
-    if metadata is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
-
-    html_content = (await request.body()).decode("utf-8")
-    doc_index = metadata.pdf_count
-
-    _save_debug_file(job_id, doc_index, ".html", html_content)
-
-    client = get_weasyprint_client(metadata.params.weasy_print_service_url)
-    try:
-        pdf_data = client.convert_html_to_pdf(html_content, metadata.params)
-    except Exception as e:
-        logger.exception("Failed to convert HTML to PDF for job '%s'", job_id)
-        raise HTTPException(status_code=502, detail=f"WeasyPrint conversion failed: {e}") from e
-
-    _save_debug_file(job_id, doc_index, ".pdf", pdf_data)
-
-    job_manager.add_pdf(job_id, pdf_data)
-    logger.info("Added document to job '%s' (total: %d)", job_id, doc_index + 1)
-    return {"status": "accepted"}
-
-
-@router.post("/{job_id}/add-with-cover", status_code=202)
-async def add_document_with_cover_to_job(job_id: str, body: AddDocumentWithCoverRequest) -> dict[str, str]:
+def add_document_to_job(job_id: str, body: AddDocumentRequest) -> dict[str, str]:
     job_manager = _get_job_manager()
     metadata = job_manager.get_job_metadata(job_id)
     if metadata is None:
@@ -95,27 +69,36 @@ async def add_document_with_cover_to_job(job_id: str, body: AddDocumentWithCover
     doc_index = metadata.pdf_count
 
     _save_debug_file(job_id, doc_index, ".html", body.html)
-    _save_debug_file(job_id, doc_index, "_cover.html", body.cover_page_html)
+    if body.cover_page_html:
+        _save_debug_file(job_id, doc_index, "_cover.html", body.cover_page_html)
 
     client = get_weasyprint_client(metadata.params.weasy_print_service_url)
     try:
         content_pdf = client.convert_html_to_pdf(body.html, metadata.params)
-        page_count = count_pdf_pages(content_pdf)
-        cover_html = resolve_cover_page_placeholders(body.cover_page_html, page_count)
-        cover_pdf = client.convert_html_to_pdf(cover_html, metadata.params)
-        pdf_data = replace_first_page_with_cover(content_pdf, cover_pdf)
+        if body.cover_page_html:
+            page_count = count_pdf_pages(content_pdf)
+            cover_html = resolve_cover_page_placeholders(body.cover_page_html, page_count)
+            cover_pdf = client.convert_html_to_pdf(cover_html, metadata.params)
+            pdf_data = replace_first_page_with_cover(content_pdf, cover_pdf)
+        else:
+            pdf_data = content_pdf
     except Exception as e:
-        logger.exception("Failed to convert HTML to PDF with cover page for job '%s'", job_id)
+        logger.exception("Failed to convert HTML to PDF for job '%s'", job_id)
         raise HTTPException(status_code=502, detail=f"WeasyPrint conversion failed: {e}") from e
 
     _save_debug_file(job_id, doc_index, ".pdf", pdf_data)
 
-    job_manager.add_pdf(job_id, pdf_data)
-    logger.info("Added document with cover page to job '%s' (total: %d)", job_id, doc_index + 1)
+    try:
+        job_manager.add_pdf(job_id, pdf_data)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")  # noqa: B904
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    logger.info("Added document to job '%s' (total: %d)", job_id, doc_index + 1)
     return {"status": "accepted"}
 
 
-@router.post("/{job_id}/stop")
+@router.post("/{job_id}/finish")
 def finish_merge_job(job_id: str) -> Response:
     job_manager = _get_job_manager()
     try:

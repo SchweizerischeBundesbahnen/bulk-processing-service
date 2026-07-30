@@ -23,9 +23,9 @@ class MergeJobStartParams(BaseModel):
     model_config = {"alias_generator": _to_camel_case, "populate_by_name": True}
 
 
-class AddDocumentWithCoverRequest(BaseModel):
+class AddDocumentRequest(BaseModel):
     html: str
-    cover_page_html: str
+    cover_page_html: str | None = None
 
     model_config = {"alias_generator": _to_camel_case, "populate_by_name": True}
 

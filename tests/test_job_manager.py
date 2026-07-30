@@ -9,6 +9,8 @@ from pypdf import PdfReader, PdfWriter
 from app.job_manager import JobManager
 from app.models import JobStatus, MergeJobStartParams
 
+NONEXISTENT_JOB_ID = "00000000000000000000000000000000"
+
 
 def _make_test_pdf() -> bytes:
     writer = PdfWriter()
@@ -45,13 +47,17 @@ class TestCreateJob:
 
 class TestGetJobMetadata:
     def test_returns_none_for_nonexistent(self, manager):
-        assert manager.get_job_metadata("nonexistent") is None
+        assert manager.get_job_metadata(NONEXISTENT_JOB_ID) is None
 
     def test_returns_metadata(self, manager, default_params):
         job_id = manager.create_job(default_params)
         metadata = manager.get_job_metadata(job_id)
         assert metadata.job_id == job_id
         assert metadata.completed_at is None
+
+    def test_rejects_invalid_job_id(self, manager):
+        with pytest.raises(KeyError, match="Invalid job ID"):
+            manager.get_job_metadata("../../../etc/passwd")
 
 
 class TestAddPdf:
@@ -68,7 +74,7 @@ class TestAddPdf:
 
     def test_raises_for_nonexistent_job(self, manager):
         with pytest.raises(KeyError, match="not found"):
-            manager.add_pdf("nonexistent", b"pdf")
+            manager.add_pdf(NONEXISTENT_JOB_ID, b"pdf")
 
     def test_raises_for_completed_job(self, manager, default_params):
         job_id = manager.create_job(default_params)
@@ -107,7 +113,7 @@ class TestCompleteJob:
 
     def test_raises_for_nonexistent_job(self, manager):
         with pytest.raises(KeyError, match="not found"):
-            manager.complete_job("nonexistent")
+            manager.complete_job(NONEXISTENT_JOB_ID)
 
     def test_raises_for_empty_job(self, manager, default_params):
         job_id = manager.create_job(default_params)
@@ -134,7 +140,7 @@ class TestDeleteJob:
         assert not (manager.storage_dir / job_id).exists()
 
     def test_noop_for_nonexistent(self, manager):
-        manager.delete_job("nonexistent")  # should not raise
+        manager.delete_job(NONEXISTENT_JOB_ID)  # should not raise
 
 
 class TestListJobs:

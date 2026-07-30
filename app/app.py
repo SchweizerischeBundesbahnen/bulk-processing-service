@@ -5,6 +5,7 @@ import contextlib
 import logging
 import os
 import pathlib
+import platform
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -46,9 +47,32 @@ app = FastAPI(title="Bulk Processing Service", description="Bulk PDF export serv
 app.include_router(converter_router)
 
 
+API_VERSION = 1
+
+
+def _read_build_timestamp() -> str:
+    timestamp_file = pathlib.Path(__file__).parent.parent / ".build_timestamp"
+    if timestamp_file.exists():
+        return timestamp_file.read_text(encoding="utf-8").strip()
+    return ""
+
+
+_BUILD_TIMESTAMP = _read_build_timestamp()
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/version")
+def version() -> dict[str, str | int]:
+    return {
+        "apiVersion": API_VERSION,
+        "python": platform.python_version(),
+        "bulkProcessingService": os.environ.get("BULK_PROCESSING_SERVICE_VERSION", "dev"),
+        "timestamp": _BUILD_TIMESTAMP,
+    }
 
 
 if __name__ == "__main__":

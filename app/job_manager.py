@@ -4,6 +4,7 @@ import fcntl
 import logging
 import os
 import pathlib
+import re
 import shutil
 import uuid
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 METADATA_FILE = "metadata.json"
 RESULT_FILE = "result.pdf"
 LOCK_FILE = "lock"
+_VALID_JOB_ID = re.compile(r"^[a-f0-9]{32}$")
 
 
 class JobManager:
@@ -31,6 +33,9 @@ class JobManager:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
     def _job_dir(self, job_id: str) -> pathlib.Path:
+        if not _VALID_JOB_ID.match(job_id):
+            msg = f"Invalid job ID: '{job_id}'"
+            raise KeyError(msg)
         return self.storage_dir / job_id
 
     def _metadata_path(self, job_id: str) -> pathlib.Path:
@@ -97,7 +102,9 @@ class JobManager:
                 msg = f"Job '{job_id}' not found"
                 raise KeyError(msg)
             if metadata.status == JobStatus.COMPLETED:
-                return self._job_dir(job_id) / RESULT_FILE
+                result = self._job_dir(job_id) / RESULT_FILE
+                if result.exists():
+                    return result
             if metadata.pdf_count == 0:
                 msg = "No documents were added to the job"
                 raise ValueError(msg)
