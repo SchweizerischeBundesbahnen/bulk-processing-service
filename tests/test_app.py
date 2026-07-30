@@ -170,6 +170,10 @@ class TestAddDocumentToJob:
         response = client.post("/api/convert/00000000000000000000000000000000/add", json={"html": "<html></html>"})
         assert response.status_code == 404
 
+    def test_add_document_malformed_job_id(self, client):
+        response = client.post("/api/convert/../../etc/passwd/add", json={"html": "<html></html>"})
+        assert response.status_code == 404
+
     @patch("app.converter_controller.get_weasyprint_client")
     def test_add_document_weasyprint_failure(self, mock_get_client, client):
         mock_client = mock_get_client.return_value
@@ -253,4 +257,8 @@ class TestDeleteMergeJob:
 
     def test_delete_not_found(self, client):
         response = client.delete("/api/convert/00000000000000000000000000000000")
+        assert response.status_code == 404
+
+    def test_delete_malformed_job_id(self, client):
+        response = client.delete("/api/convert/../../../etc")
         assert response.status_code == 404

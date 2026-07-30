@@ -52,7 +52,10 @@ def start_merge_job(params: MergeJobStartParams, job_manager: JobManagerDep) -> 
 
 @router.post("/{job_id}/add", status_code=202)
 def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobManagerDep) -> dict[str, str]:
-    metadata = job_manager.get_job_metadata(job_id)
+    try:
+        metadata = job_manager.get_job_metadata(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")  # noqa: B904
     if metadata is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
@@ -109,7 +112,11 @@ def finish_merge_job(job_id: str, job_manager: JobManagerDep) -> FileResponse:
 
 @router.delete("/{job_id}", status_code=204)
 def delete_merge_job(job_id: str, job_manager: JobManagerDep) -> None:
-    if job_manager.get_job_metadata(job_id) is None:
+    try:
+        metadata = job_manager.get_job_metadata(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")  # noqa: B904
+    if metadata is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
     job_manager.delete_job(job_id)
     logger.info("Deleted merge job '%s'", job_id)
