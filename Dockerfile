@@ -25,4 +25,4 @@ ENV BULK_PROCESSING_SERVICE_VERSION=${APP_IMAGE_VERSION}
 ENV JOB_STORAGE_DIR=/data/jobs
 ENV JOB_TTL=3h
 
-ENTRYPOINT [ "python", "-m", "app.app" ]
+ENTRYPOINT [ "python", "-m", "app.application" ]

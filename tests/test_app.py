@@ -7,28 +7,19 @@ import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 
-import app.app as app_module
 from app.app import app
-from app.converter_controller import init_job_manager
 from app.job_manager import JobManager
 from app.models import JobStatus
 
 
-@pytest.fixture(autouse=True)
-def _use_tmp_storage(tmp_path):
-    """Point job_manager at a temp directory for each test."""
-    original = app_module.job_manager
-    tmp_manager = JobManager(tmp_path / "jobs")
-    app_module.job_manager = tmp_manager
-    init_job_manager(tmp_manager)
-    yield
-    app_module.job_manager = original
-    init_job_manager(original)
-
-
 @pytest.fixture
-def client():
-    return TestClient(app)
+def client(tmp_path):
+    app.state.job_manager = JobManager(tmp_path / "jobs")
+    return TestClient(app, raise_server_exceptions=True)
+
+
+def _job_manager() -> JobManager:
+    return app.state.job_manager
 
 
 def _make_sample_pdf() -> bytes:
@@ -43,10 +34,41 @@ SAMPLE_PDF = _make_sample_pdf()
 
 
 class TestHealth:
-    def test_health_endpoint(self, client):
+    def test_health_healthy(self, client):
         response = client.get("/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert data["storage"] == "writable"
+        # Liveness must not depend on downstream services.
+        assert "weasyprint" not in data
+
+    @patch("app.app._check_storage_writable", return_value="unwritable")
+    def test_health_unhealthy_storage(self, _mock_storage, client):
+        response = client.get("/health")
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "unhealthy"
+        assert data["storage"] == "unwritable"
+
+
+class TestReady:
+    @patch("app.app._check_weasyprint_reachable", return_value="available")
+    def test_ready_when_dependencies_available(self, _mock_wp, client):
+        response = client.get("/ready")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ready"
+        assert data["storage"] == "writable"
+        assert data["weasyprint"] == "available"
+
+    @patch("app.app._check_weasyprint_reachable", return_value="unavailable")
+    def test_not_ready_when_weasyprint_unavailable(self, _mock_wp, client):
+        response = client.get("/ready")
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "not ready"
+        assert data["weasyprint"] == "unavailable"
 
 
 class TestVersion:
@@ -71,7 +93,7 @@ class TestStartMergeJob:
     def test_start_job_with_defaults(self, client):
         response = client.post("/api/convert/start", json={})
         assert response.status_code == 201
-        metadata = app_module.job_manager.get_job_metadata(response.json())
+        metadata = _job_manager().get_job_metadata(response.json())
         assert metadata is not None
         assert metadata.params.encoding == "utf-8"
         assert metadata.params.media_type == "print"
@@ -92,7 +114,7 @@ class TestStartMergeJob:
         }
         response = client.post("/api/convert/start", json=params)
         assert response.status_code == 201
-        metadata = app_module.job_manager.get_job_metadata(response.json())
+        metadata = _job_manager().get_job_metadata(response.json())
         assert metadata.params.encoding == "utf-16"
         assert metadata.params.media_type == "screen"
         assert metadata.params.presentational_hints is True
@@ -117,7 +139,7 @@ class TestAddDocumentToJob:
         assert response.status_code == 202
         assert response.json() == {"status": "accepted"}
 
-        metadata = app_module.job_manager.get_job_metadata(job_id)
+        metadata = _job_manager().get_job_metadata(job_id)
         assert metadata.pdf_count == 1
         mock_client.convert_html_to_pdf.assert_called_once()
 
@@ -141,7 +163,7 @@ class TestAddDocumentToJob:
         mock_count_pages.assert_called_once_with(b"content_pdf")
         mock_replace.assert_called_once_with(b"content_pdf", b"cover_pdf")
 
-        metadata = app_module.job_manager.get_job_metadata(job_id)
+        metadata = _job_manager().get_job_metadata(job_id)
         assert metadata.pdf_count == 1
 
     def test_add_document_job_not_found(self, client):
@@ -159,6 +181,20 @@ class TestAddDocumentToJob:
         response = client.post(f"/api/convert/{job_id}/add", json={"html": "<html></html>"})
         assert response.status_code == 502
 
+    @patch("app.converter_controller.get_weasyprint_client")
+    def test_add_document_to_completed_job_returns_409(self, mock_get_client, client):
+        mock_client = mock_get_client.return_value
+        mock_client.convert_html_to_pdf.return_value = SAMPLE_PDF
+
+        response = client.post("/api/convert/start", json={})
+        job_id = response.json()
+        client.post(f"/api/convert/{job_id}/add", json={"html": "<html></html>"})
+        client.post(f"/api/convert/{job_id}/finish")
+
+        response = client.post(f"/api/convert/{job_id}/add", json={"html": "<html>more</html>"})
+        assert response.status_code == 409
+        assert "not active" in response.json()["detail"]
+
 
 class TestFinishMergeJob:
     @patch("app.converter_controller.get_weasyprint_client")
@@ -175,7 +211,8 @@ class TestFinishMergeJob:
         response = client.post(f"/api/convert/{job_id}/finish")
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
-        assert response.headers["content-disposition"] == 'attachment; filename="result.pdf"'
+        assert "filename=\"result.pdf\"" in response.headers["content-disposition"]
+        assert "filename*=UTF-8''result.pdf" in response.headers["content-disposition"]
 
     def test_finish_job_not_found(self, client):
         response = client.post("/api/convert/00000000000000000000000000000000/finish")
@@ -198,10 +235,10 @@ class TestFinishMergeJob:
         client.post(f"/api/convert/{job_id}/add", json={"html": "<html></html>"})
         client.post(f"/api/convert/{job_id}/finish")
 
-        metadata = app_module.job_manager.get_job_metadata(job_id)
+        metadata = _job_manager().get_job_metadata(job_id)
         assert metadata is not None
         assert metadata.status == JobStatus.COMPLETED
-        assert app_module.job_manager.get_result_path(job_id) is not None
+        assert _job_manager().get_result_path(job_id) is not None
 
 
 class TestDeleteMergeJob:
@@ -212,7 +249,7 @@ class TestDeleteMergeJob:
         response = client.delete(f"/api/convert/{job_id}")
         assert response.status_code == 204
 
-        assert app_module.job_manager.get_job_metadata(job_id) is None
+        assert _job_manager().get_job_metadata(job_id) is None
 
     def test_delete_not_found(self, client):
         response = client.delete("/api/convert/00000000000000000000000000000000")

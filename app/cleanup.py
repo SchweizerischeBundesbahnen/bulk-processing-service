@@ -41,9 +41,14 @@ def _run_cleanup(job_manager: JobManager, ttl: timedelta) -> None:
     now = datetime.now(UTC)
     for metadata in job_manager.list_jobs():
         age = now - metadata.created_at
-        if metadata.status == JobStatus.COMPLETED and age > ttl:
+        completed_age = (now - metadata.completed_at).total_seconds() if metadata.completed_at else 0
+        if metadata.status == JobStatus.COMPLETED and metadata.completed_at and completed_age > ttl.total_seconds():
             job_manager.delete_job(metadata.job_id)
             logger.info("Cleaned up expired completed job '%s' (age: %s)", metadata.job_id, age)
         elif metadata.status == JobStatus.ACTIVE and age > ttl * 2:
-            job_manager.delete_job(metadata.job_id)
-            logger.warning("Cleaned up stuck active job '%s' (age: %s)", metadata.job_id, age)
+            with job_manager._try_job_lock(metadata.job_id) as acquired:
+                if acquired:
+                    job_manager.delete_job(metadata.job_id)
+                    logger.warning("Cleaned up stuck active job '%s' (age: %s)", metadata.job_id, age)
+                else:
+                    logger.debug("Skipped stuck active job '%s' — locked by another operation", metadata.job_id)

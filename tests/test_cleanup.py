@@ -1,14 +1,14 @@
 """Tests for TTL cleanup and parse_ttl."""
 
 import io
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pypdf import PdfWriter
 
-from app.cleanup import parse_ttl
+from app.cleanup import _run_cleanup, parse_ttl
 from app.job_manager import JobManager
-from app.models import JobMetadata, JobStatus, MergeJobStartParams
+from app.models import MergeJobStartParams
 
 
 def _make_test_pdf() -> bytes:
@@ -45,59 +45,49 @@ class TestParseTtl:
             parse_ttl("100")
 
 
-class TestCleanupExpiredJobs:
-    def test_completed_job_older_than_ttl_is_deleted(self, tmp_path):
-        from datetime import UTC, datetime
+class TestRunCleanup:
+    def test_deletes_completed_job_older_than_ttl(self, tmp_path):
         manager = JobManager(tmp_path / "jobs")
         job_id = manager.create_job(MergeJobStartParams())
         manager.add_pdf(job_id, _make_test_pdf())
         manager.complete_job(job_id)
 
-        # Backdate the created_at to make it expired
+        # Backdate completed_at
         metadata = manager.get_job_metadata(job_id)
-        metadata.created_at = datetime(2020, 1, 1, tzinfo=UTC)
+        metadata.completed_at = datetime(2020, 1, 1, tzinfo=UTC)
         manager._write_metadata(job_id, metadata)
 
-        # Run cleanup logic (sync, not the async loop)
-        ttl = timedelta(hours=1)
-        now = datetime.now(UTC)
-        for m in manager.list_jobs():
-            age = now - m.created_at
-            if m.status == JobStatus.COMPLETED and age > ttl:
-                manager.delete_job(m.job_id)
+        _run_cleanup(manager, timedelta(hours=1))
 
         assert manager.get_job_metadata(job_id) is None
 
-    def test_recent_completed_job_not_deleted(self, tmp_path):
-        from datetime import UTC, datetime
+    def test_keeps_recently_completed_job(self, tmp_path):
         manager = JobManager(tmp_path / "jobs")
         job_id = manager.create_job(MergeJobStartParams())
         manager.add_pdf(job_id, _make_test_pdf())
         manager.complete_job(job_id)
 
-        ttl = timedelta(hours=3)
-        now = datetime.now(UTC)
-        for m in manager.list_jobs():
-            age = now - m.created_at
-            if m.status == JobStatus.COMPLETED and age > ttl:
-                manager.delete_job(m.job_id)
+        _run_cleanup(manager, timedelta(hours=3))
 
         assert manager.get_job_metadata(job_id) is not None
 
-    def test_stuck_active_job_cleaned_after_double_ttl(self, tmp_path):
-        from datetime import UTC, datetime
+    def test_deletes_stuck_active_job_after_double_ttl(self, tmp_path):
         manager = JobManager(tmp_path / "jobs")
         job_id = manager.create_job(MergeJobStartParams())
 
+        # Backdate created_at
         metadata = manager.get_job_metadata(job_id)
         metadata.created_at = datetime(2020, 1, 1, tzinfo=UTC)
         manager._write_metadata(job_id, metadata)
 
-        ttl = timedelta(hours=1)
-        now = datetime.now(UTC)
-        for m in manager.list_jobs():
-            age = now - m.created_at
-            if m.status == JobStatus.ACTIVE and age > ttl * 2:
-                manager.delete_job(m.job_id)
+        _run_cleanup(manager, timedelta(hours=1))
 
         assert manager.get_job_metadata(job_id) is None
+
+    def test_keeps_recent_active_job(self, tmp_path):
+        manager = JobManager(tmp_path / "jobs")
+        job_id = manager.create_job(MergeJobStartParams())
+
+        _run_cleanup(manager, timedelta(hours=1))
+
+        assert manager.get_job_metadata(job_id) is not None

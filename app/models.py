@@ -1,7 +1,7 @@
 from datetime import datetime  # noqa: TC003
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 def _to_camel_case(field_name: str) -> str:
@@ -26,6 +26,15 @@ class MergeJobStartParams(BaseModel):
 class AddDocumentRequest(BaseModel):
     html: str
     cover_page_html: str | None = None
+
+    model_config = {"alias_generator": _to_camel_case, "populate_by_name": True}
+
+
+class VersionInfo(BaseModel):
+    api_version: int = Field(title="API Version", description="API version for compatibility checks")
+    python: str = Field(title="Python Version", description="Python runtime version")
+    bulk_processing_service: str = Field(title="Service Version", description="Bulk Processing Service version")
+    timestamp: str = Field(title="Build Timestamp", description="Docker image build timestamp (UTC)")
 
     model_config = {"alias_generator": _to_camel_case, "populate_by_name": True}
 

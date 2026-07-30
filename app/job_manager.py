@@ -52,6 +52,22 @@ class JobManager:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
+    @contextmanager
+    def _try_job_lock(self, job_id: str) -> Iterator[bool]:
+        lock_path = self._job_dir(job_id) / LOCK_FILE
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except OSError:
+            acquired = False
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
     def _read_metadata(self, job_id: str) -> JobMetadata | None:
         path = self._metadata_path(job_id)
         if not path.exists():
@@ -75,7 +91,7 @@ class JobManager:
     def get_job_metadata(self, job_id: str) -> JobMetadata | None:
         return self._read_metadata(job_id)
 
-    def add_pdf(self, job_id: str, pdf_data: bytes) -> None:
+    def add_pdf(self, job_id: str, pdf_data: bytes) -> int:
         if not self._job_dir(job_id).exists():
             msg = f"Job '{job_id}' not found"
             raise KeyError(msg)
@@ -87,10 +103,12 @@ class JobManager:
             if metadata.status != JobStatus.ACTIVE:
                 msg = f"Job '{job_id}' is not active"
                 raise ValueError(msg)
-            pdf_path = self._job_dir(job_id) / f"{metadata.pdf_count:03d}.pdf"
+            doc_index = metadata.pdf_count
+            pdf_path = self._job_dir(job_id) / f"{doc_index:03d}.pdf"
             pdf_path.write_bytes(pdf_data)
-            metadata.pdf_count += 1
+            metadata.pdf_count = doc_index + 1
             self._write_metadata(job_id, metadata)
+            return doc_index
 
     def complete_job(self, job_id: str) -> pathlib.Path:
         if not self._job_dir(job_id).exists():

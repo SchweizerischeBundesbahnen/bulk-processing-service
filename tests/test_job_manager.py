@@ -151,3 +151,56 @@ class TestListJobs:
 
     def test_empty_storage(self, manager):
         assert manager.list_jobs() == []
+
+
+class TestConcurrentAdd:
+    def test_concurrent_adds_produce_unique_indices(self, manager, default_params):
+        import threading
+
+        job_id = manager.create_job(default_params)
+        pdf = _make_test_pdf()
+        indices = []
+        errors = []
+
+        def add_one():
+            try:
+                idx = manager.add_pdf(job_id, pdf)
+                indices.append(idx)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add_one) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        assert sorted(indices) == list(range(10))
+        metadata = manager.get_job_metadata(job_id)
+        assert metadata.pdf_count == 10
+
+    def test_try_lock_returns_false_when_held(self, manager, default_params):
+        import threading
+
+        job_id = manager.create_job(default_params)
+        acquired_inner = []
+
+        def hold_lock():
+            with manager._job_lock(job_id):
+                event.set()
+                hold_event.wait(timeout=5)
+
+        event = threading.Event()
+        hold_event = threading.Event()
+        t = threading.Thread(target=hold_lock)
+        t.start()
+        event.wait(timeout=5)
+
+        with manager._try_job_lock(job_id) as acquired:
+            acquired_inner.append(acquired)
+
+        hold_event.set()
+        t.join()
+
+        assert acquired_inner == [False]

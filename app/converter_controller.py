@@ -1,50 +1,42 @@
 from __future__ import annotations
 
 import logging
-import os
 import pathlib
-from typing import TYPE_CHECKING
+import re
+from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 
+from app.constants import DEBUG_DIR, WEASYPRINT_SERVICE_URL, WEASYPRINT_SERVICE_URL_DEFAULT, WEASYPRINT_TIMEOUT, sanitize_for_log
+from app.job_manager import JobManager
 from app.models import AddDocumentRequest, MergeJobStartParams  # noqa: TC001
 from app.pdf_merger import count_pdf_pages, replace_first_page_with_cover, resolve_cover_page_placeholders
 from app.weasyprint_client import WeasyPrintClient
-
-if TYPE_CHECKING:
-    from app.job_manager import JobManager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/convert")
 
-_job_manager: JobManager | None = None
+
+def _get_job_manager(request: Request) -> JobManager:
+    return request.app.state.job_manager  # type: ignore[no-any-return]
 
 
-def init_job_manager(job_manager: JobManager) -> None:
-    global _job_manager  # noqa: PLW0603
-    _job_manager = job_manager
-
-
-def _get_job_manager() -> JobManager:
-    if _job_manager is None:
-        msg = "JobManager not initialized"
-        raise RuntimeError(msg)
-    return _job_manager
+JobManagerDep = Annotated[JobManager, Depends(_get_job_manager)]
 
 
 def get_weasyprint_client(job_url: str | None = None) -> WeasyPrintClient:
-    base_url = os.environ.get("WEASYPRINT_SERVICE_URL") or job_url or "http://localhost:9080"
-    timeout = float(os.environ.get("WEASYPRINT_TIMEOUT", "300"))
-    return WeasyPrintClient(base_url=base_url, timeout=timeout)
+    base_url = job_url or WEASYPRINT_SERVICE_URL or WEASYPRINT_SERVICE_URL_DEFAULT
+    return WeasyPrintClient(base_url=base_url, timeout=WEASYPRINT_TIMEOUT)
 
 
 def _save_debug_file(job_id: str, doc_index: int, suffix: str, data: str | bytes) -> None:
-    debug_dir = os.environ.get("DEBUG_DIR")
-    if not debug_dir:
+    if not DEBUG_DIR:
         return
-    pathlib.Path(debug_dir).mkdir(parents=True, exist_ok=True)
-    path = pathlib.Path(f"{debug_dir}/{job_id}_{doc_index}{suffix}")
+    pathlib.Path(DEBUG_DIR).mkdir(parents=True, exist_ok=True)
+    path = pathlib.Path(f"{DEBUG_DIR}/{job_id}_{doc_index}{suffix}")
     if isinstance(data, str):
         path.write_text(data, encoding="utf-8")
     else:
@@ -52,25 +44,17 @@ def _save_debug_file(job_id: str, doc_index: int, suffix: str, data: str | bytes
 
 
 @router.post("/start", status_code=201)
-def start_merge_job(params: MergeJobStartParams) -> str:
-    job_manager = _get_job_manager()
+def start_merge_job(params: MergeJobStartParams, job_manager: JobManagerDep) -> str:
     job_id = job_manager.create_job(params)
-    logger.info("Started merge job '%s' with fileName='%s'", job_id, params.file_name)
+    logger.info("Started merge job '%s' with fileName='%s'", job_id, sanitize_for_log(params.file_name))
     return job_id
 
 
 @router.post("/{job_id}/add", status_code=202)
-def add_document_to_job(job_id: str, body: AddDocumentRequest) -> dict[str, str]:
-    job_manager = _get_job_manager()
+def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobManagerDep) -> dict[str, str]:
     metadata = job_manager.get_job_metadata(job_id)
     if metadata is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
-
-    doc_index = metadata.pdf_count
-
-    _save_debug_file(job_id, doc_index, ".html", body.html)
-    if body.cover_page_html:
-        _save_debug_file(job_id, doc_index, "_cover.html", body.cover_page_html)
 
     client = get_weasyprint_client(metadata.params.weasy_print_service_url)
     try:
@@ -86,21 +70,24 @@ def add_document_to_job(job_id: str, body: AddDocumentRequest) -> dict[str, str]
         logger.exception("Failed to convert HTML to PDF for job '%s'", job_id)
         raise HTTPException(status_code=502, detail=f"WeasyPrint conversion failed: {e}") from e
 
-    _save_debug_file(job_id, doc_index, ".pdf", pdf_data)
-
     try:
-        job_manager.add_pdf(job_id, pdf_data)
+        doc_index = job_manager.add_pdf(job_id, pdf_data)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")  # noqa: B904
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+
+    _save_debug_file(job_id, doc_index, ".html", body.html)
+    if body.cover_page_html:
+        _save_debug_file(job_id, doc_index, "_cover.html", body.cover_page_html)
+    _save_debug_file(job_id, doc_index, ".pdf", pdf_data)
+
     logger.info("Added document to job '%s' (total: %d)", job_id, doc_index + 1)
     return {"status": "accepted"}
 
 
 @router.post("/{job_id}/finish")
-def finish_merge_job(job_id: str) -> Response:
-    job_manager = _get_job_manager()
+def finish_merge_job(job_id: str, job_manager: JobManagerDep) -> FileResponse:
     try:
         result_path = job_manager.complete_job(job_id)
     except KeyError:
@@ -110,17 +97,18 @@ def finish_merge_job(job_id: str) -> Response:
 
     metadata = job_manager.get_job_metadata(job_id)
     file_name = metadata.params.file_name if metadata else "merged-document.pdf"
+    safe_name = re.sub(r'[\x00-\x1f"\\/]', "_", file_name)
+    encoded_name = quote(file_name, safe="")
 
-    return Response(
-        content=result_path.read_bytes(),
+    return FileResponse(
+        path=result_path,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+        headers={"Content-Disposition": f"attachment; filename=\"{safe_name}\"; filename*=UTF-8''{encoded_name}"},
     )
 
 
 @router.delete("/{job_id}", status_code=204)
-def delete_merge_job(job_id: str) -> None:
-    job_manager = _get_job_manager()
+def delete_merge_job(job_id: str, job_manager: JobManagerDep) -> None:
     if job_manager.get_job_metadata(job_id) is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
     job_manager.delete_job(job_id)
