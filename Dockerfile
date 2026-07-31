@@ -23,6 +23,6 @@ RUN date -u +"%Y-%m-%dT%H:%M:%SZ" > .build_timestamp
 ENV PATH="${WORKING_DIR}/.venv/bin:${PATH}"
 ENV BULK_PROCESSING_SERVICE_VERSION=${APP_IMAGE_VERSION}
 ENV JOB_STORAGE_DIR=/data/jobs
-ENV JOB_TTL=3h
+ENV JOB_TTL=24h
 
 ENTRYPOINT [ "python", "-m", "app.application" ]

@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 import httpx
 import pytest
 
-from app.models import MergeJobStartParams
+from app.models import DocumentConversionParams
 from app.weasyprint_client import WeasyPrintClient
 
 
@@ -16,7 +16,7 @@ def client():
 
 @pytest.fixture
 def default_params():
-    return MergeJobStartParams()
+    return DocumentConversionParams()
 
 
 class TestWeasyPrintClient:
@@ -51,7 +51,7 @@ class TestWeasyPrintClient:
         mock_http_client.__exit__ = MagicMock(return_value=False)
         mock_client_cls.return_value = mock_http_client
 
-        params = MergeJobStartParams(pdf_variant="pdf/a-2b", scale_factor="2", presentational_hints=True)
+        params = DocumentConversionParams(pdf_variant="pdf/a-2b", scale_factor="2", presentational_hints=True)
         client.convert_html_to_pdf("<html></html>", params)
 
         call_kwargs = mock_http_client.post.call_args

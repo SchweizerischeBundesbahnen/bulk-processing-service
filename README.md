@@ -20,14 +20,14 @@ docker run --detach \
 
 | Environment Variable | Default | Description |
 |---|---|---|
-| `WEASYPRINT_SERVICE_URL` | — | Fallback URL of the WeasyPrint service (e.g. `http://weasyprint-service:9080`). The URL from the job start request (`weasyPrintServiceUrl`) takes precedence if provided, otherwise this env var is used, falling back to `http://localhost:9080` |
+| `WEASYPRINT_SERVICE_URL` | `http://localhost:9080` | URL of the WeasyPrint service (e.g. `http://weasyprint-service:9080`) |
 | `WEASYPRINT_TIMEOUT` | `300` | Timeout in seconds for WeasyPrint HTTP requests |
 | `JOB_STORAGE_DIR` | `/data/jobs` | Directory for storing job data (metadata, PDFs, results) |
-| `JOB_TTL` | `3h` | Time-to-live for completed jobs before cleanup. Supports `h` (hours), `m` (minutes), `s` (seconds) |
+| `JOB_TTL` | `24h` | Time-to-live for completed jobs before cleanup. Supports `h` (hours), `m` (minutes), `s` (seconds) |
 | `REQUEST_BODY_LIMIT_MB` | `500` | Maximum request body size in MB. Returns 413 if exceeded |
 | `LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
 | `LOG_DIR` | `/opt/bulk-processing-service/logs` | Directory for log files |
-| `DEBUG_DIR` | — | If set, saves incoming HTML and converted PDFs to this directory for debugging |
+| `DEBUG_DIR` | — | If set, saves incoming HTML and converted PDFs into a `debug/` subdirectory inside each job's storage directory. Debug files are cleaned up automatically with the job by TTL cleanup |
 | `PORT` | `9070` | HTTP port |
 
 ## Deployment Topology and Scaling
@@ -63,12 +63,12 @@ docker run --detach \
 
 Running multiple replicas is possible but requires:
 
-1. **Shared RWX volume** — all replicas must mount the same `JOB_STORAGE_DIR` (e.g. an NFS v4 or Kubernetes ReadWriteMany PVC). The filesystem must support POSIX `flock(2)`.
+1. **Shared RWX volume** — all replicas must mount the same `JOB_STORAGE_DIR` (e.g. an NFS v4 or Kubernetes ReadWriteMany PVC). The filesystem must support POSIX record locks (`fcntl.lockf`).
 2. **Sticky sessions** — all requests for a given job ID must reach the same replica, or any replica via the shared volume. Without sticky sessions, a load balancer may route `/add` to a different replica than `/start`, which works correctly through the shared filesystem but adds latency.
-3. **Cleanup coordination** — each replica runs its own cleanup loop independently. File-level locking (`fcntl.flock` with `LOCK_NB`) prevents a cleanup from deleting a job while another replica is writing to it. Multiple replicas performing cleanup on the same storage is safe but redundant — consider setting `JOB_TTL` to a high value or disabling cleanup on all but one replica.
+3. **Cleanup coordination** — each replica runs its own cleanup loop independently. File-level locking (`fcntl.lockf` with `LOCK_NB`) prevents a cleanup from deleting a job while another replica is writing to it. Multiple replicas performing cleanup on the same storage is safe but redundant — consider setting `JOB_TTL` to a high value or disabling cleanup on all but one replica.
 
 **Limitations of multi-replica deployment:**
-- `flock` may not work on all network filesystems (NFS v3, some FUSE mounts)
+- `lockf` requires POSIX record lock support (NFS v4+; NFS v3 and some FUSE mounts may not support it)
 - No distributed job registry — each replica discovers jobs by scanning the storage directory
 - No request routing awareness — the service does not know about other replicas
 
@@ -77,32 +77,93 @@ Running multiple replicas is possible but requires:
 ### Call Sequence
 
 ```
-start → add (1..N times) → finish
+POST /api/convert/start          → 201, job ID
+POST /api/convert/{id}/add       → 202 (repeat for each document)
+POST /api/convert/{id}/finish    → 200, merged PDF
 ```
 
 ### Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/convert/start` | Create a new merge job. Accepts `MergeJobStartParams` JSON, returns job ID |
-| POST | `/api/convert/{jobId}/add` | Add a document (`{"html": "...", "coverPageHtml": "..."}`, cover page is optional) |
-| POST | `/api/convert/{jobId}/finish` | Merge all documents and return the resulting PDF |
+| POST | `/api/convert/start` | Create a merge job |
+| POST | `/api/convert/{jobId}/add` | Convert and add a document |
+| POST | `/api/convert/{jobId}/finish` | Merge all documents, return PDF |
 | DELETE | `/api/convert/{jobId}` | Delete a job |
-| GET | `/health` | Liveness check (process and local storage only; returns 503 if storage is not writable) |
-| GET | `/ready` | Readiness check (also verifies the downstream WeasyPrint service; returns 503 if unavailable) |
-| GET | `/version` | Service version and API version |
+| GET | `/health` | Liveness (storage writable; 503 if not) |
+| GET | `/ready` | Readiness (storage + WeasyPrint; 503 if either fails) |
+| GET | `/version` | API version, service version, Python version |
+
+### Wire Format
+
+**POST /api/convert/start**
+
+Request:
+```json
+{"fileName": "merged.pdf", "pdfVariant": "pdf/a-2b"}
+```
+
+Response: `201 Created`
+```json
+{"jobId": "a1b2c3d4e5f6..."}
+```
+
+**POST /api/convert/{jobId}/add**
+
+Request:
+```json
+{
+  "html": "<html>...</html>",
+  "coverPageHtml": "<html>{{ PAGE_NUMBER }} of {{ PAGES_TOTAL_COUNT }}</html>",
+  "params": {
+    "presentationalHints": true,
+    "pdfVariant": "pdf/a-2b",
+    "scaleFactor": "2",
+    "customMetadata": false,
+    "fullFonts": false
+  }
+}
+```
+
+- `html` (required) — document HTML to convert
+- `coverPageHtml` (optional) — cover page HTML; placeholders `{{ PAGE_NUMBER }}` and `{{ PAGES_TOTAL_COUNT }}` are resolved after conversion
+- `params` (optional) — per-document WeasyPrint conversion parameters; defaults applied if omitted
+
+Response: `202 Accepted`
+```json
+{"status": "accepted"}
+```
+
+On conversion failure: `502`, failure is recorded in job metadata.
+
+**POST /api/convert/{jobId}/finish**
+
+Response: `200 OK` with `application/pdf` body and headers:
+
+| Header | Description |
+|---|---|
+| `Content-Disposition` | `attachment; filename="merged.pdf"; filename*=UTF-8''merged.pdf` |
+| `X-Documents-Merged` | Number of successfully converted documents |
+| `X-Documents-Failed` | Number of failed documents (only present if > 0) |
+
+Error responses:
+- `400` — no documents added, or all documents failed
+- `404` — job not found
 
 ### Job Lifecycle
 
-- **start** creates a job, returns a 32-character hex job ID
-- **add** sends HTML to WeasyPrint for conversion, stores the resulting PDF on disk. If `coverPageHtml` is provided, it replaces the placeholder first page with a rendered cover page. Call order defines page order in the final PDF
-- **finish** merges all PDFs into one, stores the result, marks the job as completed, and returns the merged PDF. The job data remains on disk until TTL-based cleanup removes it
+1. **start** — creates a job directory on disk, returns a 32-character hex job ID
+2. **add** (1..N times) — converts HTML to PDF via WeasyPrint using per-document `params`, stores the PDF on disk. If `coverPageHtml` is provided, the placeholder first page is replaced with the rendered cover page. Call order defines page order in the merged result. On conversion failure, the error is recorded but the job remains active for remaining documents
+3. **finish** — merges all successfully converted PDFs into one file, marks the job as COMPLETED, and streams the result. Response headers report how many documents were merged and how many failed
+4. **delete** (optional) — explicitly removes a job and all its data. Used by the caller for error cleanup (e.g. when the merge flow fails mid-way)
+
+**Completed jobs are not deleted automatically after `/finish`.** The job data (metadata, individual PDFs, merged result) remains on disk and is removed only by TTL-based background cleanup. This allows re-downloading the result or debugging after completion. The caller may also explicitly `DELETE` a job if immediate cleanup is desired.
 
 ### TTL Cleanup
 
 A background task periodically scans job storage and removes:
-- Completed jobs older than `JOB_TTL`
-- Stuck active jobs older than `2 × JOB_TTL` (safety net)
+- Completed jobs older than `JOB_TTL` (based on `completed_at` timestamp)
+- Stuck active jobs older than `2 × JOB_TTL` (safety net, based on `created_at`)
 
 ## Development
 

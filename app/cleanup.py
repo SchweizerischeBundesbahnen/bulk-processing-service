@@ -6,7 +6,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from app.models import JobStatus
+from app.models import JobMetadata, JobStatus
 
 if TYPE_CHECKING:
     from app.job_manager import JobManager
@@ -40,12 +40,25 @@ async def cleanup_expired_jobs(job_manager: JobManager, ttl: timedelta, interval
 def _run_cleanup(job_manager: JobManager, ttl: timedelta) -> None:
     now = datetime.now(UTC)
     for metadata in job_manager.list_jobs():
+        try:
+            _cleanup_job(job_manager, metadata, now, ttl)
+        except Exception:
+            logger.exception("Failed to clean up job '%s'", metadata.job_id)
+
+
+def _cleanup_job(job_manager: JobManager, metadata: JobMetadata, now: datetime, ttl: timedelta) -> None:
+    if metadata.status == JobStatus.COMPLETED and metadata.completed_at:
+        completed_age = now - metadata.completed_at
+        if completed_age > ttl:
+            with job_manager._try_job_lock(metadata.job_id) as acquired:
+                if acquired:
+                    job_manager.delete_job(metadata.job_id)
+                    logger.info("Cleaned up expired completed job '%s' (age: %s)", metadata.job_id, completed_age)
+                else:
+                    logger.debug("Skipped completed job '%s' — locked by another operation", metadata.job_id)
+    elif metadata.status == JobStatus.ACTIVE:
         age = now - metadata.created_at
-        completed_age = (now - metadata.completed_at).total_seconds() if metadata.completed_at else 0
-        if metadata.status == JobStatus.COMPLETED and metadata.completed_at and completed_age > ttl.total_seconds():
-            job_manager.delete_job(metadata.job_id)
-            logger.info("Cleaned up expired completed job '%s' (age: %s)", metadata.job_id, age)
-        elif metadata.status == JobStatus.ACTIVE and age > ttl * 2:
+        if age > ttl * 2:
             with job_manager._try_job_lock(metadata.job_id) as acquired:
                 if acquired:
                     job_manager.delete_job(metadata.job_id)

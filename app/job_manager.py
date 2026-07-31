@@ -11,8 +11,9 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from app.constants import DEBUG_DIR
 from app.models import JobMetadata, JobStatus
-from app.pdf_merger import merge_pdfs
+from app.pdf_merger import merge_pdf_files
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -46,10 +47,10 @@ class JobManager:
         lock_path = self._job_dir(job_id) / LOCK_FILE
         fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            fcntl.lockf(fd, fcntl.LOCK_EX)
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            fcntl.lockf(fd, fcntl.LOCK_UN)
             os.close(fd)
 
     @contextmanager
@@ -57,7 +58,7 @@ class JobManager:
         lock_path = self._job_dir(job_id) / LOCK_FILE
         fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             acquired = True
         except OSError:
             acquired = False
@@ -65,7 +66,7 @@ class JobManager:
             yield acquired
         finally:
             if acquired:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                fcntl.lockf(fd, fcntl.LOCK_UN)
             os.close(fd)
 
     def _read_metadata(self, job_id: str) -> JobMetadata | None:
@@ -110,6 +111,18 @@ class JobManager:
             self._write_metadata(job_id, metadata)
             return doc_index
 
+    def record_failure(self, job_id: str) -> None:
+        if not self._job_dir(job_id).exists():
+            msg = f"Job '{job_id}' not found"
+            raise KeyError(msg)
+        with self._job_lock(job_id):
+            metadata = self._read_metadata(job_id)
+            if metadata is None:
+                msg = f"Job '{job_id}' not found"
+                raise KeyError(msg)
+            metadata.failed_count += 1
+            self._write_metadata(job_id, metadata)
+
     def complete_job(self, job_id: str) -> pathlib.Path:
         if not self._job_dir(job_id).exists():
             msg = f"Job '{job_id}' not found"
@@ -126,17 +139,13 @@ class JobManager:
             if metadata.pdf_count == 0:
                 msg = "No documents were added to the job"
                 raise ValueError(msg)
-            pdf_documents = []
-            for i in range(metadata.pdf_count):
-                pdf_path = self._job_dir(job_id) / f"{i:03d}.pdf"
-                pdf_documents.append(pdf_path.read_bytes())
-            merged_pdf = merge_pdfs(pdf_documents)
+            pdf_paths = [self._job_dir(job_id) / f"{i:03d}.pdf" for i in range(metadata.pdf_count)]
             result_path = self._job_dir(job_id) / RESULT_FILE
-            result_path.write_bytes(merged_pdf)
+            merge_pdf_files(pdf_paths, result_path)
             metadata.status = JobStatus.COMPLETED
             metadata.completed_at = datetime.now(UTC)
             self._write_metadata(job_id, metadata)
-            logger.info("Completed job '%s': merged %d documents, %d bytes", job_id, metadata.pdf_count, len(merged_pdf))
+            logger.info("Completed job '%s': merged %d documents, result %d bytes", job_id, metadata.pdf_count, result_path.stat().st_size)
             return result_path
 
     def get_result_path(self, job_id: str) -> pathlib.Path | None:
@@ -144,6 +153,13 @@ class JobManager:
         if result.exists():
             return result
         return None
+
+    def get_debug_dir(self, job_id: str) -> pathlib.Path | None:
+        if not DEBUG_DIR:
+            return None
+        debug_path = self._job_dir(job_id) / "debug"
+        debug_path.mkdir(exist_ok=True)
+        return debug_path
 
     def delete_job(self, job_id: str) -> None:
         job_dir = self._job_dir(job_id)

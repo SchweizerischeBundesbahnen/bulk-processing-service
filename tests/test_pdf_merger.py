@@ -1,11 +1,12 @@
 """Tests for PDF merger."""
 
 import io
+import pathlib
 
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from app.pdf_merger import count_pdf_pages, merge_pdfs, replace_first_page_with_cover, resolve_cover_page_placeholders
+from app.pdf_merger import count_pdf_pages, merge_pdf_files, replace_first_page_with_cover, resolve_cover_page_placeholders
 
 
 def _add_text_to_page(writer: PdfWriter, page_index: int, text: str) -> None:
@@ -52,77 +53,87 @@ def create_pdf_with_placeholder() -> bytes:
     return buf.getvalue()
 
 
-class TestMergePdfs:
-    def test_merge_single_pdf(self):
-        pdf = create_test_pdf()
-        result = merge_pdfs([pdf])
-        assert result.startswith(b"%PDF")
+def _write_pdf_file(tmp_path: pathlib.Path, name: str, data: bytes) -> pathlib.Path:
+    path = tmp_path / name
+    path.write_bytes(data)
+    return path
 
-    def test_merge_multiple_pdfs(self):
-        pdfs = [create_test_pdf() for _ in range(3)]
-        result = merge_pdfs(pdfs)
-        reader = PdfReader(io.BytesIO(result))
+
+class TestMergePdfFiles:
+    def test_merge_single_pdf(self, tmp_path):
+        p = _write_pdf_file(tmp_path, "0.pdf", create_test_pdf())
+        out = tmp_path / "result.pdf"
+        merge_pdf_files([p], out)
+        assert out.read_bytes().startswith(b"%PDF")
+
+    def test_merge_multiple_pdfs(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, f"{i}.pdf", create_test_pdf()) for i in range(3)]
+        out = tmp_path / "result.pdf"
+        merge_pdf_files(paths, out)
+        reader = PdfReader(out)
         assert len(reader.pages) == 3
 
-    def test_merge_preserves_page_count(self):
-        pdfs = [create_test_pdf() for _ in range(4)]
-        result = merge_pdfs(pdfs)
-        reader = PdfReader(io.BytesIO(result))
+    def test_merge_preserves_page_count(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, f"{i}.pdf", create_test_pdf()) for i in range(4)]
+        out = tmp_path / "result.pdf"
+        merge_pdf_files(paths, out)
+        reader = PdfReader(out)
         assert len(reader.pages) == 4
 
-    def test_placeholder_page_removed(self):
-        pdf = create_pdf_with_placeholder()
-        result = merge_pdfs([pdf])
-        reader = PdfReader(io.BytesIO(result))
+    def test_placeholder_page_removed(self, tmp_path):
+        p = _write_pdf_file(tmp_path, "0.pdf", create_pdf_with_placeholder())
+        out = tmp_path / "result.pdf"
+        merge_pdf_files([p], out)
+        reader = PdfReader(out)
         assert len(reader.pages) == 1
 
-    def test_placeholder_removed_from_multiple_docs(self):
-        pdfs = [create_pdf_with_placeholder() for _ in range(3)]
-        result = merge_pdfs(pdfs)
-        reader = PdfReader(io.BytesIO(result))
+    def test_placeholder_removed_from_multiple_docs(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, f"{i}.pdf", create_pdf_with_placeholder()) for i in range(3)]
+        out = tmp_path / "result.pdf"
+        merge_pdf_files(paths, out)
+        reader = PdfReader(out)
         assert len(reader.pages) == 3
 
-    def test_single_page_pdf_not_stripped(self):
-        """A single-page PDF should never be stripped even if text matches."""
-        pdf = create_test_pdf("page to be removed")
-        result = merge_pdfs([pdf])
-        reader = PdfReader(io.BytesIO(result))
+    def test_single_page_pdf_not_stripped(self, tmp_path):
+        p = _write_pdf_file(tmp_path, "0.pdf", create_test_pdf("page to be removed"))
+        out = tmp_path / "result.pdf"
+        merge_pdf_files([p], out)
+        reader = PdfReader(out)
         assert len(reader.pages) == 1
 
-    def test_mixed_docs_with_and_without_placeholder(self):
-        pdf_with = create_pdf_with_placeholder()
-        pdf_without = create_test_pdf("no placeholder here")
-        result = merge_pdfs([pdf_with, pdf_without])
-        reader = PdfReader(io.BytesIO(result))
+    def test_mixed_docs_with_and_without_placeholder(self, tmp_path):
+        p1 = _write_pdf_file(tmp_path, "0.pdf", create_pdf_with_placeholder())
+        p2 = _write_pdf_file(tmp_path, "1.pdf", create_test_pdf("no placeholder here"))
+        out = tmp_path / "result.pdf"
+        merge_pdf_files([p1, p2], out)
+        reader = PdfReader(out)
         assert len(reader.pages) == 2
 
-    def test_normal_multipage_not_stripped(self):
-        """Multi-page PDF without placeholder should keep all pages."""
+    def test_normal_multipage_not_stripped(self, tmp_path):
         writer = PdfWriter()
         for i in range(3):
             writer.add_blank_page(width=200, height=200)
             _add_text_to_page(writer, i, f"normal page {i}")
         buf = io.BytesIO()
         writer.write(buf)
-        result = merge_pdfs([buf.getvalue()])
-        reader = PdfReader(io.BytesIO(result))
+        p = _write_pdf_file(tmp_path, "0.pdf", buf.getvalue())
+        out = tmp_path / "result.pdf"
+        merge_pdf_files([p], out)
+        reader = PdfReader(out)
         assert len(reader.pages) == 3
 
 
 class TestReplaceFirstPageWithCover:
     def test_replaces_first_page(self):
-        content_pdf = create_pdf_with_placeholder()  # 2 pages: placeholder + real
-        cover_pdf = create_test_pdf("cover page")  # 1 page
+        content_pdf = create_pdf_with_placeholder()
+        cover_pdf = create_test_pdf("cover page")
 
         result = replace_first_page_with_cover(content_pdf, cover_pdf)
         reader = PdfReader(io.BytesIO(result))
-        # cover page + real content = 2 pages
         assert len(reader.pages) == 2
 
     def test_cover_uses_only_first_page(self):
-        """If cover PDF has multiple pages, only the first is used."""
         content_pdf = create_pdf_with_placeholder()
-        # Create multi-page cover
         writer = PdfWriter()
         for i in range(3):
             writer.add_blank_page(width=200, height=200)
@@ -133,8 +144,29 @@ class TestReplaceFirstPageWithCover:
 
         result = replace_first_page_with_cover(content_pdf, cover_pdf)
         reader = PdfReader(io.BytesIO(result))
-        # 1 cover page + 1 content page = 2 pages
         assert len(reader.pages) == 2
+
+    def test_single_page_content_without_placeholder_not_lost(self):
+        content_pdf = create_test_pdf("real content")
+        cover_pdf = create_test_pdf("cover page")
+
+        result = replace_first_page_with_cover(content_pdf, cover_pdf)
+        reader = PdfReader(io.BytesIO(result))
+        assert len(reader.pages) == 2
+
+    def test_multipage_content_without_placeholder_prepends_cover(self):
+        writer = PdfWriter()
+        for i in range(3):
+            writer.add_blank_page(width=200, height=200)
+            _add_text_to_page(writer, i, f"content page {i}")
+        buf = io.BytesIO()
+        writer.write(buf)
+        content_pdf = buf.getvalue()
+        cover_pdf = create_test_pdf("cover")
+
+        result = replace_first_page_with_cover(content_pdf, cover_pdf)
+        reader = PdfReader(io.BytesIO(result))
+        assert len(reader.pages) == 4
 
 
 class TestCountPdfPages:
@@ -143,7 +175,7 @@ class TestCountPdfPages:
         assert count_pdf_pages(pdf) == 1
 
     def test_multi_page(self):
-        pdf = create_pdf_with_placeholder()  # 2 pages
+        pdf = create_pdf_with_placeholder()
         assert count_pdf_pages(pdf) == 2
 
 
@@ -162,3 +194,16 @@ class TestResolveCoverPagePlaceholders:
         html = "<html>No placeholders here</html>"
         result = resolve_cover_page_placeholders(html, 5)
         assert result == html
+
+    def test_page_number_always_one(self):
+        """PAGE_NUMBER is always 1 — cover page is the first page of its document."""
+        html = "Page {{ PAGE_NUMBER }}"
+        assert resolve_cover_page_placeholders(html, 100) == "Page 1"
+
+    def test_pages_total_count_is_per_document(self):
+        """PAGES_TOTAL_COUNT reflects the individual document page count, not the merged total."""
+        html = "{{ PAGES_TOTAL_COUNT }} pages"
+        # Document has 5 pages — cover page should say "5 pages" regardless of merge batch size
+        assert resolve_cover_page_placeholders(html, 5) == "5 pages"
+        # Different document with 12 pages
+        assert resolve_cover_page_placeholders(html, 12) == "12 pages"

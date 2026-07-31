@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 if TYPE_CHECKING:
-    from app.models import MergeJobStartParams
+    from app.models import DocumentConversionParams
 
 
 class WeasyPrintClient:
@@ -13,7 +13,7 @@ class WeasyPrintClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    def convert_html_to_pdf(self, html_content: str, params: MergeJobStartParams) -> bytes:
+    def convert_html_to_pdf(self, html_content: str, params: DocumentConversionParams) -> bytes:
         query_params: dict[str, str | bool] = {
             "presentational_hints": params.presentational_hints,
             "custom_metadata": params.custom_metadata,

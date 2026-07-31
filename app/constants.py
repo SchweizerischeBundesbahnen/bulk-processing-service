@@ -2,7 +2,7 @@ import logging
 import os
 import pathlib
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 
 API_VERSION = 1
 
@@ -14,7 +14,7 @@ WEASYPRINT_SERVICE_URL_DEFAULT = "http://localhost:9080"
 WEASYPRINT_TIMEOUT: float = float(os.environ.get("WEASYPRINT_TIMEOUT", "300"))
 
 JOB_STORAGE_DIR: str = os.environ.get("JOB_STORAGE_DIR") or str(pathlib.Path.home() / ".bulk-processing-service" / "jobs")
-JOB_TTL: str = os.environ.get("JOB_TTL", "3h")
+JOB_TTL: str = os.environ.get("JOB_TTL", "24h")
 
 DEBUG_DIR: str | None = os.environ.get("DEBUG_DIR")
 
@@ -68,7 +68,7 @@ def setup_logging() -> None:
     log_dir = pathlib.Path(LOG_DIR)
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
-        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # noqa: DTZ005
+        current_time = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
         file_handler = logging.FileHandler(log_dir / f"bulk-processing-service_{current_time}.log", encoding="utf-8")
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)

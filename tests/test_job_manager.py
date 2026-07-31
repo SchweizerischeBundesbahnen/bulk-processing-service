@@ -38,7 +38,7 @@ class TestCreateJob:
         assert metadata is not None
         assert metadata.status == JobStatus.ACTIVE
         assert metadata.pdf_count == 0
-        assert metadata.params.encoding == "utf-8"
+        assert metadata.params.file_name == "merged-document.pdf"
 
     def test_returns_unique_ids(self, manager, default_params):
         ids = {manager.create_job(default_params) for _ in range(10)}
@@ -154,53 +154,66 @@ class TestListJobs:
 
 
 class TestConcurrentAdd:
-    def test_concurrent_adds_produce_unique_indices(self, manager, default_params):
-        import threading
+    def test_concurrent_adds_from_subprocesses_produce_unique_indices(self, manager, default_params):
+        """Verify that file-level locking serialises concurrent writes from separate processes."""
+        import subprocess
+        import sys
 
         job_id = manager.create_job(default_params)
         pdf = _make_test_pdf()
+        # Pre-write a PDF so the subprocess script can reference a real file
+        test_pdf_path = manager.storage_dir / "test_payload.pdf"
+        test_pdf_path.write_bytes(pdf)
+
+        script = f"""
+import sys
+sys.path.insert(0, '.')
+from app.job_manager import JobManager
+manager = JobManager('{manager.storage_dir}')
+pdf_data = open('{test_pdf_path}', 'rb').read()
+idx = manager.add_pdf('{job_id}', pdf_data)
+print(idx)
+"""
+        processes = [subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(5)]
         indices = []
-        errors = []
+        for p in processes:
+            stdout, stderr = p.communicate(timeout=30)
+            assert p.returncode == 0, f"Subprocess failed: {stderr.decode()}"
+            indices.append(int(stdout.decode().strip()))
 
-        def add_one():
-            try:
-                idx = manager.add_pdf(job_id, pdf)
-                indices.append(idx)
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=add_one) for _ in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert not errors
-        assert sorted(indices) == list(range(10))
+        assert sorted(indices) == list(range(5))
         metadata = manager.get_job_metadata(job_id)
-        assert metadata.pdf_count == 10
+        assert metadata.pdf_count == 5
 
-    def test_try_lock_returns_false_when_held(self, manager, default_params):
-        import threading
+    def test_try_lock_returns_false_when_held_by_another_process(self, manager, default_params):
+        """fcntl.lockf is per-process — verify cross-process lock contention."""
+        import subprocess
+        import sys
 
         job_id = manager.create_job(default_params)
-        acquired_inner = []
 
-        def hold_lock():
-            with manager._job_lock(job_id):
-                event.set()
-                hold_event.wait(timeout=5)
+        # Script that holds the lock and waits for signal
+        holder_script = f"""
+import sys, os, fcntl, time
+sys.path.insert(0, '.')
+lock_path = '{manager.storage_dir}/{job_id}/lock'
+fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+fcntl.lockf(fd, fcntl.LOCK_EX)
+print('locked', flush=True)
+# Wait until parent closes stdin
+sys.stdin.readline()
+fcntl.lockf(fd, fcntl.LOCK_UN)
+os.close(fd)
+"""
+        holder = subprocess.Popen([sys.executable, "-c", holder_script], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        # Wait for lock to be acquired
+        line = holder.stdout.readline().decode().strip()
+        assert line == "locked"
 
-        event = threading.Event()
-        hold_event = threading.Event()
-        t = threading.Thread(target=hold_lock)
-        t.start()
-        event.wait(timeout=5)
-
+        # Now try_lock from this process should fail
         with manager._try_job_lock(job_id) as acquired:
-            acquired_inner.append(acquired)
+            assert acquired is False
 
-        hold_event.set()
-        t.join()
-
-        assert acquired_inner == [False]
+        # Release holder
+        holder.stdin.close()
+        holder.wait(timeout=5)
