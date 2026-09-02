@@ -152,6 +152,12 @@ class TestListJobs:
     def test_empty_storage(self, manager):
         assert manager.list_jobs() == []
 
+    def test_ignores_non_job_directories(self, manager, default_params):
+        job_id = manager.create_job(default_params)
+        (manager.storage_dir / "not-a-job").mkdir()
+        jobs = manager.list_jobs()
+        assert {j.job_id for j in jobs} == {job_id}
+
 
 class TestConcurrentAdd:
     def test_concurrent_adds_from_subprocesses_produce_unique_indices(self, manager, default_params):

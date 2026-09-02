@@ -172,6 +172,9 @@ class JobManager:
             return jobs
         for entry in self.storage_dir.iterdir():
             if entry.is_dir():
+                if not _VALID_JOB_ID.match(entry.name):
+                    logger.debug("Skipping non-job directory '%s' in storage dir", entry.name)
+                    continue
                 metadata = self._read_metadata(entry.name)
                 if metadata is not None:
                     jobs.append(metadata)
