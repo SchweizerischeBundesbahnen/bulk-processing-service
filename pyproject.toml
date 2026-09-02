@@ -23,7 +23,7 @@ Repository = "https://github.com/SchweizerischeBundesbahnen/bulk-processing-serv
 [dependency-groups]
 dev = [
     "pre-commit==4.6.2",
-    "ruff==0.16.1",
+    "ruff==0.16.5",
     "mypy==1.20.2",
 ]
 
