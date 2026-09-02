@@ -87,15 +87,15 @@ repos:
       - id: check-git-config-user-email
         args: [--templates, ^\S+\.\S+@sbb\.ch$]
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.16.5
+    rev: v4.18.0
     hooks:
       - id: commitizen
   - repo: https://github.com/hadolint/hadolint
-    rev: v2.14.0
+    rev: v2.15.1
     hooks:
       - id: hadolint
   - repo: https://github.com/woodruffw/zizmor-pre-commit
-    rev: v1.28.0
+    rev: v1.29.0
     hooks:
       - id: zizmor
   - repo: https://github.com/rhysd/actionlint
