@@ -160,6 +160,34 @@ class TestListJobs:
 
 
 class TestConcurrentAdd:
+    def test_concurrent_thread_adds_are_serialised(self, manager, default_params):
+        """Threads of one process must be serialised too: fcntl locks are per-process,
+        so without the in-process lock the read-modify-write of pdf_count would race."""
+        import threading
+
+        job_id = manager.create_job(default_params)
+        pdf = _make_test_pdf()
+        count = 20
+        errors: list[Exception] = []
+
+        def worker() -> None:
+            try:
+                manager.add_pdf(job_id, pdf)
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(count)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        metadata = manager.get_job_metadata(job_id)
+        assert metadata.pdf_count == count
+        for i in range(count):
+            assert (manager.storage_dir / job_id / f"{i:03d}.pdf").exists()
+
     def test_concurrent_adds_from_subprocesses_produce_unique_indices(self, manager, default_params):
         """Verify that file-level locking serialises concurrent writes from separate processes."""
         import subprocess

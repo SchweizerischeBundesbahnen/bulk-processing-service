@@ -6,6 +6,7 @@ import os
 import pathlib
 import re
 import shutil
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -32,6 +33,21 @@ class JobManager:
     def __init__(self, storage_dir: str | pathlib.Path) -> None:
         self.storage_dir = pathlib.Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        # fcntl locks are owned by the process, so they do not exclude the threads
+        # of a single replica (FastAPI runs the sync handlers in a threadpool), and
+        # closing any fd for the file drops the process's locks. A per-job in-process
+        # lock guards the threads of this replica; the file lock guards other
+        # replicas on the shared storage.
+        self._thread_locks_guard = threading.Lock()
+        self._thread_locks: dict[str, threading.Lock] = {}
+
+    def _thread_lock(self, job_id: str) -> threading.Lock:
+        with self._thread_locks_guard:
+            lock = self._thread_locks.get(job_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._thread_locks[job_id] = lock
+            return lock
 
     def _job_dir(self, job_id: str) -> pathlib.Path:
         if not _VALID_JOB_ID.match(job_id):
@@ -44,30 +60,43 @@ class JobManager:
 
     @contextmanager
     def _job_lock(self, job_id: str) -> Iterator[None]:
-        lock_path = self._job_dir(job_id) / LOCK_FILE
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        thread_lock = self._thread_lock(job_id)
+        thread_lock.acquire()
         try:
-            fcntl.lockf(fd, fcntl.LOCK_EX)
-            yield
+            lock_path = self._job_dir(job_id) / LOCK_FILE
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+            try:
+                fcntl.lockf(fd, fcntl.LOCK_EX)
+                yield
+            finally:
+                fcntl.lockf(fd, fcntl.LOCK_UN)
+                os.close(fd)
         finally:
-            fcntl.lockf(fd, fcntl.LOCK_UN)
-            os.close(fd)
+            thread_lock.release()
 
     @contextmanager
     def _try_job_lock(self, job_id: str) -> Iterator[bool]:
-        lock_path = self._job_dir(job_id) / LOCK_FILE
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        thread_lock = self._thread_lock(job_id)
+        if not thread_lock.acquire(blocking=False):
+            # Another thread of this replica holds the job; treat it as busy.
+            yield False
+            return
         try:
-            fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            acquired = True
-        except OSError:
-            acquired = False
-        try:
-            yield acquired
+            lock_path = self._job_dir(job_id) / LOCK_FILE
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+            try:
+                fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except OSError:
+                acquired = False
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    fcntl.lockf(fd, fcntl.LOCK_UN)
+                os.close(fd)
         finally:
-            if acquired:
-                fcntl.lockf(fd, fcntl.LOCK_UN)
-            os.close(fd)
+            thread_lock.release()
 
     def _read_metadata(self, job_id: str) -> JobMetadata | None:
         path = self._metadata_path(job_id)
@@ -167,6 +196,11 @@ class JobManager:
         job_dir = self._job_dir(job_id)
         if job_dir.exists():
             shutil.rmtree(job_dir)
+        # Job IDs are never reused, so the per-job lock is dead weight once the job
+        # is gone. Drop it to keep the map bounded; a holder mid-delete keeps its own
+        # reference to the Lock object, so this does not disturb it.
+        with self._thread_locks_guard:
+            self._thread_locks.pop(job_id, None)
 
     def list_jobs(self) -> list[JobMetadata]:
         jobs: list[JobMetadata] = []
