@@ -9,15 +9,31 @@ ARG APP_IMAGE_VERSION=0.0.0
 
 WORKDIR ${WORKING_DIR}
 
+# curl backs the healthcheck, which follows the configured http/https scheme.
+# hadolint ignore=DL3018
+RUN apk add --no-cache curl
+
 # Copy uv binary from source stage
 COPY --from=uv-source /uv /usr/local/bin/uv
 
 COPY .tool-versions pyproject.toml uv.lock ${WORKING_DIR}/
 COPY ./app/ ${WORKING_DIR}/app/
+COPY healthcheck.sh ${WORKING_DIR}/healthcheck.sh
+RUN chmod +x ${WORKING_DIR}/healthcheck.sh
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
-ENV PATH="${WORKING_DIR}/.venv/bin:${PATH}"
+RUN date -u +"%Y-%m-%dT%H:%M:%SZ" > .build_timestamp
 
-ENTRYPOINT [ "python", "-m", "app.app" ]
+ENV PATH="${WORKING_DIR}/.venv/bin:${PATH}"
+ENV BULK_PROCESSING_SERVICE_VERSION=${APP_IMAGE_VERSION}
+ENV JOB_STORAGE_DIR=/data/jobs
+ENV JOB_TTL=24h
+
+EXPOSE 9070
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/bin/sh", "-c", "./healthcheck.sh || exit 1"]
+
+ENTRYPOINT [ "python", "-m", "app.application" ]

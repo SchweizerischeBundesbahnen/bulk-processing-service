@@ -1,7 +1,7 @@
 [project]
-name = "open-source-polarion-docker-repo-template"
+name = "bulk-processing-service"
 version = "0.0.0"  # the version is controlled by the pipeline
-description = ""
+description = "Bulk PDF export service: accepts HTML, converts via WeasyPrint, merges PDFs"
 authors = [
     {name = "SBB Polarion Team", email = "polarion-opensource@sbb.ch"},
 ]
@@ -11,13 +11,14 @@ requires-python = ">=3.14,<3.15"
 
 dependencies = [
     "fastapi==0.141.1",
+    "httpx==0.28.1",
+    "pypdf==5.6.0",
     "uvicorn==0.52.4",
-    "requests==2.34.2",
 ]
 
 [project.urls]
-Homepage = "https://github.com/SchweizerischeBundesbahnen/open-source-polarion-docker-repo-template"
-Repository = "https://github.com/SchweizerischeBundesbahnen/open-source-polarion-docker-repo-template"
+Homepage = "https://github.com/SchweizerischeBundesbahnen/bulk-processing-service"
+Repository = "https://github.com/SchweizerischeBundesbahnen/bulk-processing-service"
 
 [dependency-groups]
 dev = [

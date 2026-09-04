@@ -1,0 +1,49 @@
+---
+# Mode 1: functional bulk-export chain with no TLS and no API key.
+#
+#   client -> bulk-processing-service -> weasyprint-service
+#
+# Both services speak plain HTTP and require no credentials, which is the
+# combination the current code supports end to end (the API-key hops are not
+# wired on the client sides yet). Bring it up with:
+#
+#   docker compose up --build
+#
+# then drive it against http://localhost:9070 (see the README call sequence).
+services:
+  weasyprint-service:
+    image: ghcr.io/schweizerischebundesbahnen/weasyprint-service:${WEASYPRINT_IMAGE_TAG:-latest}
+    init: true
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONUNBUFFERED=1
+      # API_KEY and TLS_* intentionally unset: Mode 1 is plain HTTP, no auth.
+    ports:
+      - 9080:9080  # exposed for direct probing; the chain uses the internal network
+
+  bulk-processing-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_IMAGE_VERSION: ${APP_IMAGE_VERSION:-0.0.0}
+    init: true
+    depends_on:
+      weasyprint-service:
+        condition: service_healthy  # the weasyprint image ships a healthcheck
+    environment:
+      - WEASYPRINT_SERVICE_URL=http://weasyprint-service:9080
+      - JOB_STORAGE_DIR=/data/jobs
+      - JOB_TTL=${JOB_TTL:-24h}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONUNBUFFERED=1
+      # API_KEY and TLS_* intentionally unset: Mode 1 is plain HTTP, no auth.
+    volumes:
+      - bulk_processing_jobs:/data/jobs  # persist jobs across restarts
+    ports:
+      - 9070:9070
+
+volumes:
+  bulk_processing_jobs:
+    name: ${COMPOSE_PROJECT_NAME:-bulk-processing}_jobs
+    driver: local
