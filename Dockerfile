@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:0.12.3@sha256:2d890623d310b57771ce840f0da5eed5fc6d657da05ffaa45d82797b53fa3abc AS uv-source
+FROM ghcr.io/astral-sh/uv:0.12.9@sha256:8b940d3a9d65bed080436972241af2e21c84b5e8c9193f7014ed71479ee795ff AS uv-source
 
 FROM python:3.14.7-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc
 LABEL maintainer="SBB Polarion Team <polarion-opensource@sbb.ch>"
@@ -9,8 +9,8 @@ ARG APP_IMAGE_VERSION=0.0.0
 
 WORKDIR ${WORKING_DIR}
 
-# curl backs the healthcheck, which follows the configured http/https scheme and
-# can present a client certificate under mutual TLS.
+# curl backs the healthcheck, which follows the configured http/https scheme.
+# hadolint ignore=DL3018
 RUN apk add --no-cache curl
 
 # Copy uv binary from source stage
