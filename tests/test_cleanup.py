@@ -92,6 +92,33 @@ class TestRunCleanup:
 
         assert manager.get_job_metadata(job_id) is not None
 
+    def test_keeps_long_active_job_with_recent_activity(self, tmp_path):
+        # An old job that is still making progress (recent add) must not be deleted.
+        manager = JobManager(tmp_path / "jobs")
+        job_id = manager.create_job(MergeJobStartParams())
+        metadata = manager.get_job_metadata(job_id)
+        metadata.created_at = datetime(2020, 1, 1, tzinfo=UTC)
+        manager._write_metadata(job_id, metadata)
+        manager.add_pdf(job_id, _make_test_pdf())  # refreshes updated_at to now
+
+        _run_cleanup(manager, timedelta(hours=1))
+
+        assert manager.get_job_metadata(job_id) is not None
+
+    def test_deletes_active_job_idle_beyond_double_ttl(self, tmp_path):
+        # No activity for well over 2x TTL -> genuinely stuck -> deleted.
+        manager = JobManager(tmp_path / "jobs")
+        job_id = manager.create_job(MergeJobStartParams())
+        manager.add_pdf(job_id, _make_test_pdf())
+        metadata = manager.get_job_metadata(job_id)
+        metadata.created_at = datetime(2020, 1, 1, tzinfo=UTC)
+        metadata.updated_at = datetime(2020, 1, 1, tzinfo=UTC)
+        manager._write_metadata(job_id, metadata)
+
+        _run_cleanup(manager, timedelta(hours=1))
+
+        assert manager.get_job_metadata(job_id) is None
+
     def test_one_failure_does_not_break_entire_pass(self, tmp_path):
         manager = JobManager(tmp_path / "jobs")
         job1 = manager.create_job(MergeJobStartParams())

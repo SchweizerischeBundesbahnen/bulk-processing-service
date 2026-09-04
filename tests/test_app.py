@@ -218,6 +218,55 @@ class TestAddDocumentToJob:
         assert "not active" in response.json()["detail"]
 
 
+class TestBodySizeLimit:
+    @staticmethod
+    def _client(max_bytes: int = 10):
+        from fastapi import FastAPI, Request
+
+        from app.app import BodySizeLimitMiddleware
+
+        limited = FastAPI()
+
+        @limited.post("/echo")
+        async def echo(request: Request):
+            body = await request.body()
+            return {"len": len(body)}
+
+        limited.add_middleware(BodySizeLimitMiddleware, max_bytes=max_bytes)
+        return TestClient(limited)
+
+    def test_small_body_passes(self):
+        response = self._client().post("/echo", content=b"12345")
+        assert response.status_code == 200
+        assert response.json()["len"] == 5
+
+    def test_declared_content_length_over_limit_rejected(self):
+        response = self._client().post("/echo", content=b"x" * 50)
+        assert response.status_code == 413
+
+    def test_invalid_content_length_rejected(self):
+        response = self._client().post("/echo", content=b"x", headers={"content-length": "not-a-number"})
+        assert response.status_code == 400
+
+    def test_chunked_body_over_limit_rejected(self):
+        # An iterator body is sent chunked (no Content-Length); the cap must still hold.
+        def chunks():
+            for _ in range(4):
+                yield b"xxxxx"  # 20 bytes total, no declared length
+
+        response = self._client().post("/echo", content=chunks())
+        assert response.status_code == 413
+
+    def test_chunked_body_within_limit_passes(self):
+        def chunks():
+            yield b"abcd"
+            yield b"ef"  # 6 bytes total
+
+        response = self._client().post("/echo", content=chunks())
+        assert response.status_code == 200
+        assert response.json()["len"] == 6
+
+
 class TestFinishMergeJob:
     @patch("app.converter_controller.get_weasyprint_client")
     def test_finish_job_returns_merged_pdf(self, mock_get_client, client):
@@ -253,6 +302,24 @@ class TestFinishMergeJob:
         assert response.status_code == 200
         assert response.headers["x-documents-merged"] == "1"
         assert response.headers["x-documents-failed"] == "1"
+
+    @patch("app.converter_controller.get_weasyprint_client")
+    def test_finish_job_non_ascii_filename(self, mock_get_client, client):
+        # A title with a non-Latin-1 character (en-dash) must not make the response
+        # header unencodable: the download must still succeed, with the real name in
+        # filename* and an ASCII fallback in filename=.
+        mock_client = mock_get_client.return_value
+        mock_client.convert_html_to_pdf.return_value = SAMPLE_PDF
+
+        job_id = _start_job(client, fileName="Report – Q1 «2026».pdf")
+        client.post(f"/api/convert/{job_id}/add", json={"html": "<html></html>"})
+
+        response = client.post(f"/api/convert/{job_id}/finish")
+        assert response.status_code == 200
+        disposition = response.headers["content-disposition"]
+        disposition.encode("latin-1")  # must be header-encodable
+        assert "filename*=UTF-8''Report" in disposition
+        assert 'filename="Report _ Q1 _2026_.pdf"' in disposition
 
     def test_finish_job_not_found(self, client):
         response = client.post("/api/convert/00000000000000000000000000000000/finish")

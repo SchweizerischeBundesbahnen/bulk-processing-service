@@ -57,11 +57,21 @@ def _cleanup_job(job_manager: JobManager, metadata: JobMetadata, now: datetime, 
                 else:
                     logger.debug("Skipped completed job '%s' — locked by another operation", metadata.job_id)
     elif metadata.status == JobStatus.ACTIVE:
-        age = now - metadata.created_at
-        if age > ttl * 2:
+        # Base "stuck" on the last activity, not creation: a long batch that keeps
+        # adding documents refreshes updated_at and must not be deleted mid-flight.
+        last_activity = metadata.updated_at or metadata.created_at
+        if now - last_activity > ttl * 2:
             with job_manager._try_job_lock(metadata.job_id) as acquired:
-                if acquired:
-                    job_manager.delete_job(metadata.job_id)
-                    logger.warning("Cleaned up stuck active job '%s' (age: %s)", metadata.job_id, age)
-                else:
+                if not acquired:
                     logger.debug("Skipped stuck active job '%s' — locked by another operation", metadata.job_id)
+                    return
+                # Re-read under the lock: the snapshot from list_jobs may be stale, so
+                # a job that finished or made progress since then must not be deleted.
+                current = job_manager.get_job_metadata(metadata.job_id)
+                if current is None or current.status != JobStatus.ACTIVE:
+                    return
+                current_last_activity = current.updated_at or current.created_at
+                if now - current_last_activity <= ttl * 2:
+                    return
+                job_manager.delete_job(metadata.job_id)
+                logger.warning("Cleaned up stuck active job '%s' (idle: %s)", metadata.job_id, now - current_last_activity)

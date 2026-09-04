@@ -54,6 +54,10 @@ class JobMetadata(BaseModel):
     job_id: str
     status: JobStatus
     created_at: datetime
+    # Last time a document was added or a failure recorded. Cleanup treats an active
+    # job as stuck based on this, not created_at, so a long batch that keeps making
+    # progress is not deleted mid-flight. None for jobs written before this field.
+    updated_at: datetime | None = None
     completed_at: datetime | None = None
     params: MergeJobStartParams
     pdf_count: int = 0

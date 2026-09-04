@@ -125,7 +125,12 @@ def finish_merge_job(job_id: str, job_manager: JobManagerDep) -> FileResponse:
 
     metadata = job_manager.get_job_metadata(job_id)
     file_name = metadata.params.file_name if metadata else "merged-document.pdf"
+    # The quoted filename must be ASCII: Starlette encodes response headers as
+    # latin-1, so a title with an en-dash or a non-Latin script would otherwise
+    # make Content-Disposition unencodable and fail the download. The real name is
+    # carried by filename*=UTF-8''… below; this is only the legacy fallback.
     safe_name = re.sub(r'[\x00-\x1f"\\/]', "_", file_name)
+    safe_name = re.sub(r"[^\x20-\x7e]", "_", safe_name)
     encoded_name = quote(file_name, safe="")
 
     headers: dict[str, str] = {

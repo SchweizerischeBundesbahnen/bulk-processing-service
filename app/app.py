@@ -12,12 +12,15 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import httpx
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from starlette.datastructures import Headers
 from starlette.responses import PlainTextResponse
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator
+
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.cleanup import cleanup_expired_jobs, parse_ttl
 from app.constants import (
@@ -61,17 +64,67 @@ _WEASYPRINT_HEALTH_CACHE_TTL = 5.0
 _weasyprint_status: tuple[float, str] = (0.0, "unavailable")
 
 
-@app.middleware("http")
-async def check_request_size(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            declared = int(content_length)
-        except ValueError:
-            return PlainTextResponse("Invalid Content-Length header", status_code=400)
-        if declared > REQUEST_BODY_LIMIT:
-            return PlainTextResponse(f"Request body too large (limit: {REQUEST_BODY_LIMIT} bytes)", status_code=413)
-    return await call_next(request)
+class BodySizeLimitMiddleware:
+    """Reject request bodies larger than the limit, including chunked ones.
+
+    The Content-Length header only bounds requests that declare their size; a
+    chunked request carries none, so the body is also read here up to the limit
+    and rejected as soon as it is exceeded. Reading stops at the limit, so memory
+    stays bounded, and the buffered body is replayed to the application - which
+    parses the whole body anyway - so nothing downstream has to change.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        content_length = Headers(scope=scope).get("content-length")
+        if content_length is not None:
+            try:
+                declared = int(content_length)
+            except ValueError:
+                await self._reject(scope, receive, send, 400, "Invalid Content-Length header")
+                return
+            if declared > self.max_bytes:
+                await self._reject(scope, receive, send, 413, self._too_large_message())
+                return
+
+        body = bytearray()
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message["type"] != "http.request":
+                break
+            body += message.get("body", b"")
+            more_body = message.get("more_body", False)
+            if len(body) > self.max_bytes:
+                await self._reject(scope, receive, send, 413, self._too_large_message())
+                return
+
+        replayed = False
+
+        async def replay() -> Message:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+    def _too_large_message(self) -> str:
+        return f"Request body too large (limit: {self.max_bytes} bytes)"
+
+    async def _reject(self, scope: Scope, receive: Receive, send: Send, status_code: int, message: str) -> None:
+        await PlainTextResponse(message, status_code=status_code)(scope, receive, send)
+
+
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=REQUEST_BODY_LIMIT)
 
 
 def _check_storage_writable() -> str:

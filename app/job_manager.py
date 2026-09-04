@@ -108,6 +108,7 @@ class JobManager:
             pdf_path = self._job_dir(job_id) / f"{doc_index:03d}.pdf"
             pdf_path.write_bytes(pdf_data)
             metadata.pdf_count = doc_index + 1
+            metadata.updated_at = datetime.now(UTC)
             self._write_metadata(job_id, metadata)
             return doc_index
 
@@ -121,6 +122,7 @@ class JobManager:
                 msg = f"Job '{job_id}' not found"
                 raise KeyError(msg)
             metadata.failed_count += 1
+            metadata.updated_at = datetime.now(UTC)
             self._write_metadata(job_id, metadata)
 
     def complete_job(self, job_id: str) -> pathlib.Path:
