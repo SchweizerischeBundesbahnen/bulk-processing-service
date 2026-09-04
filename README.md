@@ -181,7 +181,7 @@ Response: `202 Accepted`
 {"status": "accepted"}
 ```
 
-On conversion failure: `502`, failure is recorded in job metadata.
+On conversion failure: `202 Accepted` with `{"status": "failed"}` — the failure is recorded in job metadata and reported once in `X-Documents-Failed` at `/finish`. The job stays active for the remaining documents.
 
 **POST /api/convert/{jobId}/finish**
 
