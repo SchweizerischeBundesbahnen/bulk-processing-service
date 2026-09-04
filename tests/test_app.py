@@ -184,12 +184,25 @@ class TestAddDocumentToJob:
 
         job_id = _start_job(client)
 
+        # A render failure is accepted (202) and recorded, not returned as an error:
+        # the server is the single counter, so the caller does not also count it.
         response = client.post(f"/api/convert/{job_id}/add", json={"html": "<html></html>"})
-        assert response.status_code == 502
+        assert response.status_code == 202
+        assert response.json()["status"] == "failed"
 
         metadata = _job_manager().get_job_metadata(job_id)
         assert metadata.failed_count == 1
         assert metadata.pdf_count == 0
+
+    def test_save_debug_file_swallows_write_errors(self, tmp_path, monkeypatch):
+        # A failed debug write must not raise: the document is already stored, so the
+        # add must still succeed. Point the debug dir at a path whose parent is missing.
+        from app.converter_controller import _save_debug_file
+
+        manager = JobManager(tmp_path / "jobs")
+        monkeypatch.setattr(manager, "get_debug_dir", lambda _job_id: tmp_path / "missing" / "deeper")
+
+        _save_debug_file(manager, "0" * 32, 0, ".pdf", b"data")  # must not raise
 
     @patch("app.converter_controller.get_weasyprint_client")
     def test_add_document_to_completed_job_returns_409(self, mock_get_client, client):
@@ -223,6 +236,23 @@ class TestFinishMergeJob:
         assert "filename*=UTF-8''result.pdf" in response.headers["content-disposition"]
         assert response.headers["x-documents-merged"] == "2"
         assert "x-documents-failed" not in response.headers
+
+    @patch("app.converter_controller.get_weasyprint_client")
+    def test_finish_reports_each_failure_once(self, mock_get_client, client):
+        # One document fails to render, one succeeds. The failure must be reported
+        # exactly once, in X-Documents-Failed, and the merged PDF holds the one good doc.
+        mock_client = mock_get_client.return_value
+        mock_client.convert_html_to_pdf.side_effect = [RuntimeError("boom"), SAMPLE_PDF]
+
+        job_id = _start_job(client)
+        r_fail = client.post(f"/api/convert/{job_id}/add", json={"html": "<html>bad</html>"})
+        r_ok = client.post(f"/api/convert/{job_id}/add", json={"html": "<html>good</html>"})
+        assert (r_fail.json()["status"], r_ok.json()["status"]) == ("failed", "accepted")
+
+        response = client.post(f"/api/convert/{job_id}/finish")
+        assert response.status_code == 200
+        assert response.headers["x-documents-merged"] == "1"
+        assert response.headers["x-documents-failed"] == "1"
 
     def test_finish_job_not_found(self, client):
         response = client.post("/api/convert/00000000000000000000000000000000/finish")

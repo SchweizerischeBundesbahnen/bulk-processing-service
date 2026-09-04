@@ -1,5 +1,6 @@
 """Tests for WeasyPrint client."""
 
+import ssl
 from unittest.mock import patch, MagicMock
 
 import httpx
@@ -77,3 +78,62 @@ class TestWeasyPrintClient:
     def test_trailing_slash_stripped(self):
         client = WeasyPrintClient(base_url="http://weasyprint:9080/")
         assert client.base_url == "http://weasyprint:9080"
+
+    @patch("app.weasyprint_client.httpx.Client")
+    def test_verifies_against_platform_trust_store(self, mock_client_cls, default_params):
+        mock_response = MagicMock()
+        mock_response.content = b"%PDF"
+        mock_response.raise_for_status = MagicMock()
+
+        mock_http_client = MagicMock()
+        mock_http_client.post.return_value = mock_response
+        mock_http_client.__enter__ = MagicMock(return_value=mock_http_client)
+        mock_http_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_http_client
+
+        client = WeasyPrintClient(base_url="https://weasyprint:9080")
+        client.convert_html_to_pdf("<html></html>", default_params)
+
+        assert isinstance(mock_client_cls.call_args.kwargs["verify"], ssl.SSLContext)
+
+    def test_api_key_defaults_to_none(self):
+        assert WeasyPrintClient(base_url="https://weasyprint:9080").api_key is None
+
+    @patch("app.weasyprint_client.httpx.Client")
+    def test_api_key_sent_over_https(self, mock_client_cls, default_params):
+        mock_response = MagicMock()
+        mock_response.content = b"%PDF"
+        mock_response.raise_for_status = MagicMock()
+
+        mock_http_client = MagicMock()
+        mock_http_client.post.return_value = mock_response
+        mock_http_client.__enter__ = MagicMock(return_value=mock_http_client)
+        mock_http_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_http_client
+
+        client = WeasyPrintClient(base_url="https://weasyprint:9080", api_key="secret")
+        client.convert_html_to_pdf("<html></html>", default_params)
+
+        assert mock_http_client.post.call_args.kwargs["headers"]["X-API-Key"] == "secret"
+
+    def test_api_key_refused_over_plain_http(self, default_params):
+        client = WeasyPrintClient(base_url="http://weasyprint:9080", api_key="secret")
+        with pytest.raises(ValueError, match="not sent over plain http"):
+            client.convert_html_to_pdf("<html></html>", default_params)
+
+    @patch("app.weasyprint_client.httpx.Client")
+    def test_no_api_key_header_when_unset(self, mock_client_cls, default_params):
+        mock_response = MagicMock()
+        mock_response.content = b"%PDF"
+        mock_response.raise_for_status = MagicMock()
+
+        mock_http_client = MagicMock()
+        mock_http_client.post.return_value = mock_response
+        mock_http_client.__enter__ = MagicMock(return_value=mock_http_client)
+        mock_http_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_http_client
+
+        client = WeasyPrintClient(base_url="http://weasyprint:9080")
+        client.convert_html_to_pdf("<html></html>", default_params)
+
+        assert "X-API-Key" not in mock_http_client.post.call_args.kwargs["headers"]

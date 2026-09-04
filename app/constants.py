@@ -13,6 +13,11 @@ WEASYPRINT_SERVICE_URL: str | None = os.environ.get("WEASYPRINT_SERVICE_URL")
 WEASYPRINT_SERVICE_URL_DEFAULT = "http://localhost:9080"
 WEASYPRINT_TIMEOUT: float = float(os.environ.get("WEASYPRINT_TIMEOUT", "300"))
 
+# API key sent to WeasyPrint when it is started with authentication enabled. It is
+# only ever put on an https transport; over plain http the request is refused so the
+# credential is not exposed. Empty sends no key.
+WEASYPRINT_API_KEY: str = os.environ.get("WEASYPRINT_API_KEY", "").strip()
+
 JOB_STORAGE_DIR: str = os.environ.get("JOB_STORAGE_DIR") or str(pathlib.Path.home() / ".bulk-processing-service" / "jobs")
 JOB_TTL: str = os.environ.get("JOB_TTL", "24h")
 

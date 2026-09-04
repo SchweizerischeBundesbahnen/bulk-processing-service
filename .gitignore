@@ -181,3 +181,12 @@ pyrightconfig.json
 /.vscode/
 junittest.xml
 /.history/
+
+# Local TLS material for the compose Mode 2 stack (never commit private keys)
+/certs/
+
+# Local TLS / cert-issuance test scaffolding — kept on disk, not committed
+/docker-compose.tls.yml
+/docker-compose.apikey.yml
+/docker-compose.pebble.yml
+/pebble/

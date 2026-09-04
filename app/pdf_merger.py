@@ -41,6 +41,9 @@ def _is_placeholder_page(page: PageObject) -> bool:
 def replace_first_page_with_cover(content_pdf: bytes, cover_pdf: bytes) -> bytes:
     content_reader = PdfReader(io.BytesIO(content_pdf))
     cover_reader = PdfReader(io.BytesIO(cover_pdf))
+    if not cover_reader.pages:
+        msg = "Cover page PDF has no pages"
+        raise ValueError(msg)
     writer = PdfWriter()
     writer.add_page(cover_reader.pages[0])
     has_placeholder = len(content_reader.pages) > 1 and _is_placeholder_page(content_reader.pages[0])

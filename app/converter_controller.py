@@ -9,7 +9,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from app.constants import WEASYPRINT_SERVICE_URL, WEASYPRINT_SERVICE_URL_DEFAULT, WEASYPRINT_TIMEOUT, sanitize_for_log
+from app.auth import require_api_key
+from app.constants import WEASYPRINT_API_KEY, WEASYPRINT_SERVICE_URL, WEASYPRINT_SERVICE_URL_DEFAULT, WEASYPRINT_TIMEOUT, sanitize_for_log
 from app.job_manager import JobManager
 from app.models import AddDocumentRequest, MergeJobStartParams  # noqa: TC001
 from app.pdf_merger import count_pdf_pages, replace_first_page_with_cover, resolve_cover_page_placeholders
@@ -17,7 +18,10 @@ from app.weasyprint_client import WeasyPrintClient
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/convert")
+# The merge endpoints carry document content, so they are guarded by the optional
+# API key. The dependency is a no-op until API_KEY is configured. Probes and the
+# version endpoint stay open, as they carry nothing worth protecting.
+router = APIRouter(prefix="/api/convert", dependencies=[Depends(require_api_key)])
 
 
 def _get_job_manager(request: Request) -> JobManager:
@@ -29,7 +33,7 @@ JobManagerDep = Annotated[JobManager, Depends(_get_job_manager)]
 
 def get_weasyprint_client() -> WeasyPrintClient:
     base_url = WEASYPRINT_SERVICE_URL or WEASYPRINT_SERVICE_URL_DEFAULT
-    return WeasyPrintClient(base_url=base_url, timeout=WEASYPRINT_TIMEOUT)
+    return WeasyPrintClient(base_url=base_url, timeout=WEASYPRINT_TIMEOUT, api_key=WEASYPRINT_API_KEY or None)
 
 
 def _save_debug_file(job_manager: JobManager, job_id: str, doc_index: int, suffix: str, data: str | bytes) -> None:
@@ -37,10 +41,15 @@ def _save_debug_file(job_manager: JobManager, job_id: str, doc_index: int, suffi
     if debug_dir is None:
         return
     path = debug_dir / f"{doc_index:03d}{suffix}"
-    if isinstance(data, str):
-        path.write_text(data, encoding="utf-8")
-    else:
-        path.write_bytes(data)
+    # Debug output is best-effort: the document is already stored, so a failed
+    # debug write must not turn a successful add into an error.
+    try:
+        if isinstance(data, str):
+            path.write_text(data, encoding="utf-8")
+        else:
+            path.write_bytes(data)
+    except OSError:
+        logger.warning("Could not write debug file '%s' for job '%s'", path.name, job_id)
 
 
 @router.post("/start", status_code=201)
@@ -69,11 +78,15 @@ def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobM
             pdf_data = replace_first_page_with_cover(content_pdf, cover_pdf)
         else:
             pdf_data = content_pdf
-    except Exception as e:
+    except Exception:
+        # A per-document render failure does not abort the batch: it is recorded here
+        # (surfaced in X-Documents-Failed at finish) and reported back as an accepted
+        # 202 so the caller does not also count it. Returning an error would make the
+        # server and the caller each count the same failure, inflating the total.
         logger.exception("Failed to convert HTML to PDF for job '%s'", job_id)
         with contextlib.suppress(Exception):
             job_manager.record_failure(job_id)
-        raise HTTPException(status_code=502, detail="WeasyPrint conversion failed") from e
+        return {"status": "failed"}
 
     try:
         doc_index = job_manager.add_pdf(job_id, pdf_data)

@@ -22,6 +22,7 @@ docker run --detach \
 |---|---|---|
 | `WEASYPRINT_SERVICE_URL` | `http://localhost:9080` | URL of the WeasyPrint service (e.g. `http://weasyprint-service:9080`) |
 | `WEASYPRINT_TIMEOUT` | `300` | Timeout in seconds for WeasyPrint HTTP requests |
+| `WEASYPRINT_API_KEY` | — | API key sent to WeasyPrint (as `X-API-Key`) when it requires authentication. Only sent over `https`; a plain-http `WEASYPRINT_SERVICE_URL` refuses the request |
 | `JOB_STORAGE_DIR` | `/data/jobs` | Directory for storing job data (metadata, PDFs, results) |
 | `JOB_TTL` | `24h` | Time-to-live for completed jobs before cleanup. Supports `h` (hours), `m` (minutes), `s` (seconds) |
 | `REQUEST_BODY_LIMIT_MB` | `500` | Maximum request body size in MB. Returns 413 if exceeded |
@@ -29,6 +30,52 @@ docker run --detach \
 | `LOG_DIR` | `/opt/bulk-processing-service/logs` | Directory for log files |
 | `DEBUG_DIR` | — | If set, saves incoming HTML and converted PDFs into a `debug/` subdirectory inside each job's storage directory. Debug files are cleaned up automatically with the job by TTL cleanup |
 | `PORT` | `9070` | HTTP port |
+| `API_KEY` | — | Enables [API key authentication](#api-key) when set. Comma-separated list allows several keys for rotation |
+
+TLS is configured through the `TLS_*` variables described under [HTTPS](#https).
+
+## Security
+
+### HTTPS
+
+The server speaks plain HTTP by default, which is what a deployment behind a reverse proxy or an ingress expects: TLS terminates there and nothing has to be configured here. That remains the recommended setup where such a component is already in place.
+
+Where the service is reached directly across a network, it can serve TLS itself. Set at least a certificate and its key:
+
+| Environment Variable | Description |
+|---|---|
+| `TLS_CERT_FILE` | Certificate chain in PEM format |
+| `TLS_KEY_FILE` | Private key in PEM format |
+| `TLS_KEY_PASSWORD` | Password of the key, where it has one |
+
+```bash
+docker run --detach \
+  --publish 9070:9070 \
+  --volume /path/to/tls:/opt/bulk-processing-service/tls:ro \
+  --env TLS_CERT_FILE=/opt/bulk-processing-service/tls/server.pem \
+  --env TLS_KEY_FILE=/opt/bulk-processing-service/tls/server.key \
+  --name bulk-processing-service \
+  ghcr.io/schweizerischebundesbahnen/bulk-processing-service:latest
+```
+
+An incomplete configuration stops the start rather than falling back to plain HTTP. The material is loaded before the server listens, so a key which does not match its certificate or a wrong `TLS_KEY_PASSWORD` also stops the start, rather than surfacing at the first connection. Callers are authenticated by the API key below, not by client certificates.
+
+**The container healthcheck** follows the configured scheme. It talks to its own process over loopback, so it does not verify the certificate.
+
+**Certificate renewal.** The certificate is read once, at startup. A renewed certificate takes effect when the container restarts.
+
+**Reaching WeasyPrint over https.** The paragraphs above are the inbound side. To have the service itself call WeasyPrint over `https`, set `WEASYPRINT_SERVICE_URL` to an `https` address. The server certificate is verified against the container's trust store, the same model the PDF Exporter uses with the JVM truststore: where WeasyPrint presents a privately signed certificate, install that CA into the container (for example with `update-ca-certificates`, or point the standard `SSL_CERT_FILE` at it) — the application carries no CA of its own. Where WeasyPrint requires an API key, send it with `WEASYPRINT_API_KEY` (only over https).
+
+### API key
+
+Authentication is disabled by default. It activates when `API_KEY` holds at least one non-empty key. Several keys can be configured as a comma-separated list, which allows key rotation without downtime. Clients send the key in one of two headers:
+
+- `X-API-Key: <key>`
+- `Authorization: Bearer <key>`
+
+Only the merge endpoints under `/api/convert` are guarded. The `/health`, `/ready` and `/version` endpoints stay open, so probes keep working without a key. A missing or invalid key is answered with `401`.
+
+Since the key is a reusable credential, name the service with an `https` address where a key is configured, so it is not put on the wire in the clear.
 
 ## Deployment Topology and Scaling
 

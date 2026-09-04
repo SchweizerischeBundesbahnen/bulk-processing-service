@@ -20,10 +20,20 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
 from app.cleanup import cleanup_expired_jobs, parse_ttl
-from app.constants import API_VERSION, BUILD_TIMESTAMP, JOB_STORAGE_DIR, JOB_TTL, REQUEST_BODY_LIMIT, SERVICE_VERSION, WEASYPRINT_SERVICE_URL, WEASYPRINT_SERVICE_URL_DEFAULT
+from app.constants import (
+    API_VERSION,
+    BUILD_TIMESTAMP,
+    JOB_STORAGE_DIR,
+    JOB_TTL,
+    REQUEST_BODY_LIMIT,
+    SERVICE_VERSION,
+    WEASYPRINT_SERVICE_URL,
+    WEASYPRINT_SERVICE_URL_DEFAULT,
+)
 from app.converter_controller import router as converter_router
 from app.job_manager import JobManager
 from app.models import VersionInfo
+from app.weasyprint_client import TLS_CONTEXT
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +97,7 @@ def _check_weasyprint_reachable() -> str:
         return cached
     base_url = WEASYPRINT_SERVICE_URL or WEASYPRINT_SERVICE_URL_DEFAULT
     try:
-        with httpx.Client(timeout=_WEASYPRINT_HEALTH_TIMEOUT) as client:
+        with httpx.Client(timeout=_WEASYPRINT_HEALTH_TIMEOUT, verify=TLS_CONTEXT) as client:
             response = client.get(f"{base_url}/version")
             result = "available" if response.status_code == _HTTP_OK else "unavailable"
     except Exception:  # noqa: BLE001

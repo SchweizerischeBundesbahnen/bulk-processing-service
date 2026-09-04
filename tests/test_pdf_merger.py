@@ -3,6 +3,7 @@
 import io
 import pathlib
 
+import pytest
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
@@ -167,6 +168,14 @@ class TestReplaceFirstPageWithCover:
         result = replace_first_page_with_cover(content_pdf, cover_pdf)
         reader = PdfReader(io.BytesIO(result))
         assert len(reader.pages) == 4
+
+    def test_empty_cover_pdf_is_rejected_clearly(self):
+        content_pdf = create_test_pdf("real content")
+        empty_buf = io.BytesIO()
+        PdfWriter().write(empty_buf)  # a valid PDF with zero pages
+
+        with pytest.raises(ValueError, match="Cover page PDF has no pages"):
+            replace_first_page_with_cover(content_pdf, empty_buf.getvalue())
 
 
 class TestCountPdfPages:
