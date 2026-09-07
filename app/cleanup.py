@@ -47,31 +47,43 @@ def _run_cleanup(job_manager: JobManager, ttl: timedelta) -> None:
 
 
 def _cleanup_job(job_manager: JobManager, metadata: JobMetadata, now: datetime, ttl: timedelta) -> None:
-    if metadata.status == JobStatus.COMPLETED and metadata.completed_at:
-        completed_age = now - metadata.completed_at
-        if completed_age > ttl:
-            with job_manager._try_job_lock(metadata.job_id) as acquired:
-                if acquired:
-                    job_manager.delete_job(metadata.job_id)
-                    logger.info("Cleaned up expired completed job '%s' (age: %s)", metadata.job_id, completed_age)
-                else:
-                    logger.debug("Skipped completed job '%s' — locked by another operation", metadata.job_id)
+    if metadata.status == JobStatus.COMPLETED:
+        _cleanup_completed_job(job_manager, metadata, now, ttl)
     elif metadata.status == JobStatus.ACTIVE:
-        # Base "stuck" on the last activity, not creation: a long batch that keeps
-        # adding documents refreshes updated_at and must not be deleted mid-flight.
-        last_activity = metadata.updated_at or metadata.created_at
-        if now - last_activity > ttl * 2:
-            with job_manager._try_job_lock(metadata.job_id) as acquired:
-                if not acquired:
-                    logger.debug("Skipped stuck active job '%s' — locked by another operation", metadata.job_id)
-                    return
-                # Re-read under the lock: the snapshot from list_jobs may be stale, so
-                # a job that finished or made progress since then must not be deleted.
-                current = job_manager.get_job_metadata(metadata.job_id)
-                if current is None or current.status != JobStatus.ACTIVE:
-                    return
-                current_last_activity = current.updated_at or current.created_at
-                if now - current_last_activity <= ttl * 2:
-                    return
-                job_manager.delete_job(metadata.job_id)
-                logger.warning("Cleaned up stuck active job '%s' (idle: %s)", metadata.job_id, now - current_last_activity)
+        _cleanup_active_job(job_manager, metadata, now, ttl)
+
+
+def _cleanup_completed_job(job_manager: JobManager, metadata: JobMetadata, now: datetime, ttl: timedelta) -> None:
+    if not metadata.completed_at:
+        return
+    completed_age = now - metadata.completed_at
+    if completed_age <= ttl:
+        return
+    with job_manager._try_job_lock(metadata.job_id) as acquired:
+        if not acquired:
+            logger.debug("Skipped completed job '%s' — locked by another operation", metadata.job_id)
+            return
+        job_manager.delete_job(metadata.job_id)
+        logger.info("Cleaned up expired completed job '%s' (age: %s)", metadata.job_id, completed_age)
+
+
+def _cleanup_active_job(job_manager: JobManager, metadata: JobMetadata, now: datetime, ttl: timedelta) -> None:
+    # Base "stuck" on the last activity, not creation: a long batch that keeps
+    # adding documents refreshes updated_at and must not be deleted mid-flight.
+    last_activity = metadata.updated_at or metadata.created_at
+    if now - last_activity <= ttl * 2:
+        return
+    with job_manager._try_job_lock(metadata.job_id) as acquired:
+        if not acquired:
+            logger.debug("Skipped stuck active job '%s' — locked by another operation", metadata.job_id)
+            return
+        # Re-read under the lock: the snapshot from list_jobs may be stale, so a job
+        # that finished or made progress since then must not be deleted.
+        current = job_manager.get_job_metadata(metadata.job_id)
+        if current is None or current.status != JobStatus.ACTIVE:
+            return
+        current_last_activity = current.updated_at or current.created_at
+        if now - current_last_activity <= ttl * 2:
+            return
+        job_manager.delete_job(metadata.job_id)
+        logger.warning("Cleaned up stuck active job '%s' (idle: %s)", metadata.job_id, now - current_last_activity)

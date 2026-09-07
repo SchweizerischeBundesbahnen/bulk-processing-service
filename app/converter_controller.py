@@ -49,17 +49,24 @@ def _save_debug_file(job_manager: JobManager, job_id: str, doc_index: int, suffi
         else:
             path.write_bytes(data)
     except OSError:
-        logger.warning("Could not write debug file '%s' for job '%s'", path.name, job_id)
+        logger.warning("Could not write debug file '%s' for job '%s'", path.name, sanitize_for_log(job_id))
 
 
 @router.post("/start", status_code=201)
 def start_merge_job(params: MergeJobStartParams, job_manager: JobManagerDep) -> dict[str, str]:
     job_id = job_manager.create_job(params)
-    logger.info("Started merge job '%s' with fileName='%s'", job_id, sanitize_for_log(params.file_name))
+    logger.info("Started merge job '%s' with fileName='%s'", sanitize_for_log(job_id), sanitize_for_log(params.file_name))
     return {"jobId": job_id}
 
 
-@router.post("/{job_id}/add", status_code=202)
+@router.post(
+    "/{job_id}/add",
+    status_code=202,
+    responses={
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not active"},
+    },
+)
 def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobManagerDep) -> dict[str, str]:
     try:
         metadata = job_manager.get_job_metadata(job_id)
@@ -83,7 +90,7 @@ def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobM
         # (surfaced in X-Documents-Failed at finish) and reported back as an accepted
         # 202 so the caller does not also count it. Returning an error would make the
         # server and the caller each count the same failure, inflating the total.
-        logger.exception("Failed to convert HTML to PDF for job '%s'", job_id)
+        logger.exception("Failed to convert HTML to PDF for job '%s'", sanitize_for_log(job_id))
         with contextlib.suppress(Exception):
             job_manager.record_failure(job_id)
         return {"status": "failed"}
@@ -100,11 +107,17 @@ def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobM
         _save_debug_file(job_manager, job_id, doc_index, "_cover.html", body.cover_page_html)
     _save_debug_file(job_manager, job_id, doc_index, ".pdf", pdf_data)
 
-    logger.info("Added document to job '%s' (total: %d)", job_id, doc_index + 1)
+    logger.info("Added document to job '%s' (total: %d)", sanitize_for_log(job_id), doc_index + 1)
     return {"status": "accepted"}
 
 
-@router.post("/{job_id}/finish")
+@router.post(
+    "/{job_id}/finish",
+    responses={
+        404: {"description": "Job not found"},
+        400: {"description": "No documents to merge, or all documents failed"},
+    },
+)
 def finish_merge_job(job_id: str, job_manager: JobManagerDep) -> FileResponse:
     try:
         metadata_before = job_manager.get_job_metadata(job_id)
@@ -143,7 +156,11 @@ def finish_merge_job(job_id: str, job_manager: JobManagerDep) -> FileResponse:
     return FileResponse(path=result_path, media_type="application/pdf", headers=headers)
 
 
-@router.delete("/{job_id}", status_code=204)
+@router.delete(
+    "/{job_id}",
+    status_code=204,
+    responses={404: {"description": "Job not found"}},
+)
 def delete_merge_job(job_id: str, job_manager: JobManagerDep) -> None:
     try:
         metadata = job_manager.get_job_metadata(job_id)
@@ -152,4 +169,4 @@ def delete_merge_job(job_id: str, job_manager: JobManagerDep) -> None:
     if metadata is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
     job_manager.delete_job(job_id)
-    logger.info("Deleted merge job '%s'", job_id)
+    logger.info("Deleted merge job '%s'", sanitize_for_log(job_id))

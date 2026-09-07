@@ -6,9 +6,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pypdf import PdfWriter
 
-from app.cleanup import _run_cleanup, parse_ttl
+from app.cleanup import _cleanup_active_job, _cleanup_completed_job, _run_cleanup, cleanup_expired_jobs, parse_ttl
 from app.job_manager import JobManager
-from app.models import MergeJobStartParams
+from app.models import JobStatus, MergeJobStartParams
 
 
 def _make_test_pdf() -> bytes:
@@ -180,3 +180,84 @@ os.close(fd)
 
         holder.stdin.close()
         holder.wait(timeout=5)
+
+
+class TestCleanupBranches:
+    def test_completed_job_without_completed_at_is_skipped(self, tmp_path):
+        manager = JobManager(tmp_path / "jobs")
+        job_id = manager.create_job(MergeJobStartParams())
+        manager.add_pdf(job_id, _make_test_pdf())
+        manager.complete_job(job_id)
+        metadata = manager.get_job_metadata(job_id)
+        metadata.completed_at = None  # missing timestamp -> cannot age it
+        manager._write_metadata(job_id, metadata)
+
+        _cleanup_completed_job(manager, manager.get_job_metadata(job_id), datetime.now(UTC), timedelta(hours=1))
+
+        assert manager.get_job_metadata(job_id) is not None
+
+    def test_active_cleanup_skips_when_locked(self, tmp_path):
+        manager = JobManager(tmp_path / "jobs")
+        job_id = manager.create_job(MergeJobStartParams())
+        stale = manager.get_job_metadata(job_id)
+        stale.created_at = datetime(2020, 1, 1, tzinfo=UTC)
+        manager._write_metadata(job_id, stale)
+
+        thread_lock = manager._thread_lock(job_id)
+        thread_lock.acquire()
+        try:
+            _cleanup_active_job(manager, stale, datetime.now(UTC), timedelta(hours=1))
+        finally:
+            thread_lock.release()
+
+        assert manager.get_job_metadata(job_id) is not None  # skipped, not deleted
+
+    def test_active_cleanup_reread_sees_status_change(self, tmp_path, monkeypatch):
+        manager = JobManager(tmp_path / "jobs")
+        job_id = manager.create_job(MergeJobStartParams())
+        stale = manager.get_job_metadata(job_id)
+        stale.created_at = datetime(2020, 1, 1, tzinfo=UTC)
+
+        # Under the lock the job is re-read as COMPLETED, so it must not be deleted.
+        completed = stale.model_copy(update={"status": JobStatus.COMPLETED})
+        monkeypatch.setattr(manager, "get_job_metadata", lambda _job_id: completed)
+
+        _cleanup_active_job(manager, stale, datetime.now(UTC), timedelta(hours=1))
+
+        assert (manager.storage_dir / job_id).exists()  # not deleted
+
+    def test_active_cleanup_reread_sees_recent_activity(self, tmp_path):
+        manager = JobManager(tmp_path / "jobs")
+        job_id = manager.create_job(MergeJobStartParams())
+        manager.add_pdf(job_id, _make_test_pdf())  # on-disk updated_at = now (fresh)
+
+        stale = manager.get_job_metadata(job_id).model_copy(
+            update={"created_at": datetime(2020, 1, 1, tzinfo=UTC), "updated_at": datetime(2020, 1, 1, tzinfo=UTC)}
+        )
+
+        _cleanup_active_job(manager, stale, datetime.now(UTC), timedelta(hours=1))
+
+        assert manager.get_job_metadata(job_id) is not None  # re-read is fresh, kept
+
+    @pytest.mark.asyncio
+    async def test_loop_logs_error_and_continues(self, tmp_path, monkeypatch):
+        import asyncio
+
+        manager = JobManager(tmp_path / "jobs")
+        calls = {"n": 0}
+
+        async def fake_sleep(_seconds):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                raise asyncio.CancelledError
+
+        def boom(*_args):
+            raise RuntimeError("cleanup boom")
+
+        monkeypatch.setattr("app.cleanup.asyncio.sleep", fake_sleep)
+        monkeypatch.setattr("app.cleanup._run_cleanup", boom)
+
+        with pytest.raises(asyncio.CancelledError):
+            await cleanup_expired_jobs(manager, timedelta(hours=1))
+
+        assert calls["n"] == 2  # first iteration's error was caught, then cancelled
