@@ -1,12 +1,13 @@
 """Tests for bulk processing service API endpoints."""
 
 import io
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 
+from app import app as app_module
 from app.app import app
 from app.job_manager import JobManager
 from app.models import JobStatus
@@ -446,3 +447,56 @@ class TestSSRFAndVersionContract:
         data = response.json()
         assert isinstance(data["apiVersion"], int)
         assert data["apiVersion"] >= 1
+
+
+class TestLifespanAndProbes:
+    def test_lifespan_starts_and_stops(self, tmp_path, monkeypatch):
+        # Entering the TestClient context runs the real lifespan (job manager +
+        # cleanup task) and the middleware's non-http (lifespan) scope.
+        monkeypatch.setattr(app_module, "JOB_STORAGE_DIR", str(tmp_path / "jobs"))
+        with TestClient(app) as c:
+            assert c.get("/health").status_code == 200
+
+    def test_health_unhealthy_when_storage_unwritable(self, client, monkeypatch):
+        # A path under an existing file cannot be created -> storage "unwritable".
+        monkeypatch.setattr(app_module, "JOB_STORAGE_DIR", "/dev/null/jobs")
+        response = client.get("/health")
+        assert response.status_code == 503
+        assert response.json()["storage"] == "unwritable"
+
+
+class TestWeasyprintReachable:
+    def _reset_cache(self):
+        app_module._weasyprint_status = (0.0, "unavailable")
+
+    def test_available_when_version_ok(self):
+        self._reset_cache()
+        with patch("app.app.httpx.Client") as mock_cls:
+            resp = MagicMock()
+            resp.status_code = 200
+            http = MagicMock()
+            http.get.return_value = resp
+            http.__enter__ = MagicMock(return_value=http)
+            http.__exit__ = MagicMock(return_value=False)
+            mock_cls.return_value = http
+            assert app_module._check_weasyprint_reachable() == "available"
+            # Second call is served from the cache, without hitting httpx again.
+            assert app_module._check_weasyprint_reachable() == "available"
+            assert mock_cls.call_count == 1
+
+    def test_unavailable_on_non_200(self):
+        self._reset_cache()
+        with patch("app.app.httpx.Client") as mock_cls:
+            resp = MagicMock()
+            resp.status_code = 503
+            http = MagicMock()
+            http.get.return_value = resp
+            http.__enter__ = MagicMock(return_value=http)
+            http.__exit__ = MagicMock(return_value=False)
+            mock_cls.return_value = http
+            assert app_module._check_weasyprint_reachable() == "unavailable"
+
+    def test_unavailable_on_exception(self):
+        self._reset_cache()
+        with patch("app.app.httpx.Client", side_effect=RuntimeError("boom")):
+            assert app_module._check_weasyprint_reachable() == "unavailable"

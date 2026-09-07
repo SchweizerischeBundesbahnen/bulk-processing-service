@@ -173,9 +173,10 @@ class TestReplaceFirstPageWithCover:
         content_pdf = create_test_pdf("real content")
         empty_buf = io.BytesIO()
         PdfWriter().write(empty_buf)  # a valid PDF with zero pages
+        empty_cover = empty_buf.getvalue()
 
         with pytest.raises(ValueError, match="Cover page PDF has no pages"):
-            replace_first_page_with_cover(content_pdf, empty_buf.getvalue())
+            replace_first_page_with_cover(content_pdf, empty_cover)
 
 
 class TestCountPdfPages:

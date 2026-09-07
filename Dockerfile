@@ -19,7 +19,7 @@ COPY --from=uv-source /uv /usr/local/bin/uv
 COPY .tool-versions pyproject.toml uv.lock ${WORKING_DIR}/
 COPY ./app/ ${WORKING_DIR}/app/
 COPY healthcheck.sh ${WORKING_DIR}/healthcheck.sh
-RUN chmod +x ${WORKING_DIR}/healthcheck.sh
+RUN chmod +x "${WORKING_DIR}/healthcheck.sh"
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
@@ -30,6 +30,16 @@ ENV PATH="${WORKING_DIR}/.venv/bin:${PATH}"
 ENV BULK_PROCESSING_SERVICE_VERSION=${APP_IMAGE_VERSION}
 ENV JOB_STORAGE_DIR=/data/jobs
 ENV JOB_TTL=24h
+ENV LOG_DIR=/opt/bulk-processing-service/logs
+
+# Run as a non-root user. The app writes only to the job storage and the log
+# directory, so those are created and owned by the user; the code and the venv
+# stay root-owned and read-only. The service listens on 9070 (>1024), so no
+# privileged port is needed.
+RUN adduser -D -u 1000 appuser && \
+    mkdir -p "${JOB_STORAGE_DIR}" "${LOG_DIR}" && \
+    chown -R appuser:appuser "${JOB_STORAGE_DIR}" "${LOG_DIR}"
+USER 1000:1000
 
 EXPOSE 9070
 

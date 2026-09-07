@@ -13,7 +13,6 @@
 # Bulk Processing Service
 
 Bulk PDF export service for Polarion PDF Exporter. Accepts HTML documents, converts them to PDF via WeasyPrint, and merges into a single output file with optional cover pages.
-
 ## Running the Service
 
 ```bash

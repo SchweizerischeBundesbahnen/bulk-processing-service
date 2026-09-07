@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from app.constants import DEBUG_DIR
+from app.constants import DEBUG_DIR, sanitize_for_log
 from app.models import JobMetadata, JobStatus
 from app.pdf_merger import merge_pdf_files
 
@@ -176,7 +176,7 @@ class JobManager:
             metadata.status = JobStatus.COMPLETED
             metadata.completed_at = datetime.now(UTC)
             self._write_metadata(job_id, metadata)
-            logger.info("Completed job '%s': merged %d documents, result %d bytes", job_id, metadata.pdf_count, result_path.stat().st_size)
+            logger.info("Completed job '%s': merged %d documents, result %d bytes", sanitize_for_log(job_id), metadata.pdf_count, result_path.stat().st_size)
             return result_path
 
     def get_result_path(self, job_id: str) -> pathlib.Path | None:
