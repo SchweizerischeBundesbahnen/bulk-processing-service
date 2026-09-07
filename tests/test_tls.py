@@ -94,6 +94,16 @@ def test_unreadable_certificate_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp
         get_tls_options()
 
 
+def test_file_present_but_not_readable_is_rejected(monkeypatch: pytest.MonkeyPatch, pem_files: tuple[str, str]) -> None:
+    cert, key = pem_files
+    monkeypatch.setenv("TLS_CERT_FILE", cert)
+    monkeypatch.setenv("TLS_KEY_FILE", key)
+    monkeypatch.setattr("os.access", lambda *_args, **_kwargs: False)
+
+    with pytest.raises(TlsConfigurationError, match="cannot be read"):
+        get_tls_options()
+
+
 def test_material_which_does_not_load_is_reported(monkeypatch: pytest.MonkeyPatch, pem_files: tuple[str, str]) -> None:
     """A readable file is not usable material: the key has to match its certificate."""
     cert, key = pem_files

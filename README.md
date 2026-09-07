@@ -13,7 +13,6 @@
 # Bulk Processing Service
 
 Bulk PDF export service for Polarion PDF Exporter. Accepts HTML documents, converts them to PDF via WeasyPrint, and merges into a single output file with optional cover pages.
-
 ## Running the Service
 
 ```bash
@@ -112,6 +111,8 @@ docker run --detach \
   --env WEASYPRINT_SERVICE_URL=http://weasyprint-service:9080 \
   ghcr.io/schweizerischebundesbahnen/bulk-processing-service:latest
 ```
+
+> **The container runs as non-root (`UID 1000`).** Any host path bind-mounted over `JOB_STORAGE_DIR`, `LOG_DIR` or the TLS material must be readable/writable by `1000:1000` — otherwise `/health` reports `storage: unwritable`, file logging is silently skipped, or an unreadable TLS key stops the start. Make the host directory owned by `1000:1000` (`chown -R 1000:1000 …`), or run with a matching `--user`/Kubernetes `fsGroup`. Named volumes (as in `docker-compose.yml`) inherit the image ownership and need no action.
 
 ### Multiple replicas (shared volume)
 

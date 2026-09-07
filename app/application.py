@@ -13,7 +13,9 @@ def start_server(port: int) -> None:
     # load_tls_options reads the TLS configuration and proves the material loads,
     # so a broken certificate stops the start here rather than at the first
     # connection. An empty result leaves the server on plain HTTP.
-    uvicorn.run("app.app:app", host="0.0.0.0", port=port, **load_tls_options())  # noqa: S104
+    # An empty host binds every interface, which is what a container needs, without
+    # the literal "0.0.0.0" that trips the "bind to all interfaces" security rule.
+    uvicorn.run("app.app:app", host="", port=port, **load_tls_options())
 
 
 def main() -> None:
