@@ -30,6 +30,23 @@ def default_params():
     return MergeJobStartParams()
 
 
+class TestJobDirContainment:
+    def test_valid_id_resolves_inside_storage(self, manager, default_params):
+        job_id = manager.create_job(default_params)
+        job_dir = manager._job_dir(job_id)
+        assert job_dir.is_relative_to(manager.storage_dir.resolve())
+
+    @pytest.mark.parametrize("bad_id", ["../../etc/passwd", ".", "", "a/.."])
+    def test_escape_is_rejected_even_if_pattern_bypassed(self, manager, monkeypatch, bad_id):
+        # Simulate a loosened id pattern: the direct-child check must still block both
+        # a traversal id and one that resolves to the storage root itself.
+        import re
+
+        monkeypatch.setattr("app.job_manager._VALID_JOB_ID", re.compile(r".*"))
+        with pytest.raises(KeyError):
+            manager._job_dir(bad_id)
+
+
 class TestCreateJob:
     def test_creates_directory_and_metadata(self, manager, default_params):
         job_id = manager.create_job(default_params)
