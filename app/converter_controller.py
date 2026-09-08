@@ -49,7 +49,7 @@ def _save_debug_file(job_manager: JobManager, job_id: str, doc_index: int, suffi
         else:
             path.write_bytes(data)
     except OSError:
-        logger.warning("Could not write debug file '%s' for job '%s'", path.name, sanitize_for_log(job_id))
+        logger.warning("Could not write debug file '%s' for job '%s'", sanitize_for_log(path.name), sanitize_for_log(job_id))
 
 
 @router.post("/start", status_code=201)
