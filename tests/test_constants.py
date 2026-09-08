@@ -41,8 +41,14 @@ class TestRequestBodyLimit:
 
 
 class TestSanitizeForLog:
-    def test_strips_control_characters(self):
-        assert constants.sanitize_for_log("a\nb\tc\r\x00d") == "abcd"
+    def test_line_breaks_become_spaces(self):
+        # Newlines/carriage returns are replaced with spaces so a value cannot forge
+        # a new log line; other control characters are stripped.
+        assert constants.sanitize_for_log("a\nb\tc\r\x00d") == "a bc d"
+
+    def test_no_control_characters_survive(self):
+        for ch in ("\n", "\r", "\t", "\x00", "\x1f", "\x7f"):
+            assert ch not in constants.sanitize_for_log(f"x{ch}y")
 
     def test_keeps_normal_text(self):
         assert constants.sanitize_for_log("job-123 ok") == "job-123 ok"

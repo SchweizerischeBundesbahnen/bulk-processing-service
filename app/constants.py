@@ -55,6 +55,10 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def sanitize_for_log(value: str) -> str:
+    # Replace line breaks explicitly (so a value cannot forge a log line) before
+    # stripping the remaining control characters. The explicit newline replacement
+    # is also the form static analysis recognises as a log-injection barrier.
+    value = value.replace("\n", " ").replace("\r", " ")
     return _CONTROL_CHARS.sub("", value)
 
 
