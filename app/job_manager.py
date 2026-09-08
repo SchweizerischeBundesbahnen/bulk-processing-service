@@ -50,10 +50,22 @@ class JobManager:
             return lock
 
     def _job_dir(self, job_id: str) -> pathlib.Path:
-        if not _VALID_JOB_ID.match(job_id):
+        if not _VALID_JOB_ID.fullmatch(job_id):
             msg = f"Invalid job ID: '{job_id}'"
             raise KeyError(msg)
-        return self.storage_dir / job_id
+        # Defence in depth on top of the id pattern: the real path must stay inside
+        # the storage directory, so a job id can never escape it even if the pattern
+        # above were ever loosened. Every job path is built from here.
+        base = os.path.realpath(self.storage_dir)
+        job_dir = os.path.realpath(base + os.sep + job_id)
+        # The real path must sit strictly under the storage root. Requiring the
+        # `base + os.sep` prefix rejects both an escape and the root itself (an id
+        # like "", "." or "a/.." resolving to base, which would otherwise let
+        # delete_job wipe the whole storage directory).
+        if not job_dir.startswith(base + os.sep):
+            msg = f"Invalid job ID: '{job_id}'"
+            raise KeyError(msg)
+        return pathlib.Path(job_dir)
 
     def _metadata_path(self, job_id: str) -> pathlib.Path:
         return self._job_dir(job_id) / METADATA_FILE
@@ -208,8 +220,11 @@ class JobManager:
             return jobs
         for entry in self.storage_dir.iterdir():
             if entry.is_dir():
-                if not _VALID_JOB_ID.match(entry.name):
-                    logger.debug("Skipping non-job directory '%s' in storage dir", entry.name)
+                # fullmatch to agree with _job_dir: a name like "<32 hex>\n" that
+                # match() would accept (its $ allows a trailing newline) must be
+                # skipped here, or _job_dir would reject it and break the sweep.
+                if not _VALID_JOB_ID.fullmatch(entry.name):
+                    logger.debug("Skipping non-job directory '%s' in storage dir", sanitize_for_log(entry.name))
                     continue
                 metadata = self._read_metadata(entry.name)
                 if metadata is not None:

@@ -30,6 +30,23 @@ def default_params():
     return MergeJobStartParams()
 
 
+class TestJobDirContainment:
+    def test_valid_id_resolves_inside_storage(self, manager, default_params):
+        job_id = manager.create_job(default_params)
+        job_dir = manager._job_dir(job_id)
+        assert job_dir.is_relative_to(manager.storage_dir.resolve())
+
+    @pytest.mark.parametrize("bad_id", ["../../etc/passwd", ".", "", "a/.."])
+    def test_escape_is_rejected_even_if_pattern_bypassed(self, manager, monkeypatch, bad_id):
+        # Simulate a loosened id pattern: the direct-child check must still block both
+        # a traversal id and one that resolves to the storage root itself.
+        import re
+
+        monkeypatch.setattr("app.job_manager._VALID_JOB_ID", re.compile(r".*"))
+        with pytest.raises(KeyError):
+            manager._job_dir(bad_id)
+
+
 class TestCreateJob:
     def test_creates_directory_and_metadata(self, manager, default_params):
         job_id = manager.create_job(default_params)
@@ -156,6 +173,14 @@ class TestListJobs:
         job_id = manager.create_job(default_params)
         (manager.storage_dir / "not-a-job").mkdir()
         jobs = manager.list_jobs()
+        assert {j.job_id for j in jobs} == {job_id}
+
+    def test_ignores_hex_name_with_trailing_newline(self, manager, default_params):
+        # A "<32 hex>\n" directory is accepted by match() but not by _job_dir's
+        # fullmatch; list_jobs must skip it rather than let _job_dir raise.
+        job_id = manager.create_job(default_params)
+        (manager.storage_dir / (("a" * 32) + "\n")).mkdir()
+        jobs = manager.list_jobs()  # must not raise
         assert {j.job_id for j in jobs} == {job_id}
 
 
