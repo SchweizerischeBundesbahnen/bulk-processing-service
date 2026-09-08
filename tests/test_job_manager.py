@@ -175,6 +175,14 @@ class TestListJobs:
         jobs = manager.list_jobs()
         assert {j.job_id for j in jobs} == {job_id}
 
+    def test_ignores_hex_name_with_trailing_newline(self, manager, default_params):
+        # A "<32 hex>\n" directory is accepted by match() but not by _job_dir's
+        # fullmatch; list_jobs must skip it rather than let _job_dir raise.
+        job_id = manager.create_job(default_params)
+        (manager.storage_dir / (("a" * 32) + "\n")).mkdir()
+        jobs = manager.list_jobs()  # must not raise
+        assert {j.job_id for j in jobs} == {job_id}
+
 
 class TestConcurrentAdd:
     def test_concurrent_thread_adds_are_serialised(self, manager, default_params):
