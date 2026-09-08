@@ -224,7 +224,7 @@ class JobManager:
                 # match() would accept (its $ allows a trailing newline) must be
                 # skipped here, or _job_dir would reject it and break the sweep.
                 if not _VALID_JOB_ID.fullmatch(entry.name):
-                    logger.debug("Skipping non-job directory '%s' in storage dir", entry.name)
+                    logger.debug("Skipping non-job directory '%s' in storage dir", sanitize_for_log(entry.name))
                     continue
                 metadata = self._read_metadata(entry.name)
                 if metadata is not None:
