@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.1](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/compare/v1.0.0...v1.0.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency pypdf to v6.18.0 ([7639b5d](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/7639b5d73dffaa9bfd18092bc7352ce4c17d2361))
+* **deps:** update dependency tox to v4.61.4 ([f892e61](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/f892e61901e0eba0f5af7e193c4998c34bc91fde))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.11 ([628409d](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/628409d5cd6e03651ab76872d975b1c7d9cbcef1))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.12 ([99a5e98](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/99a5e9836af8336d14c839950147b8eec190f4c0))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.13 ([c29adc0](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/c29adc000073985c4151dd1ab4d0837f1164b631))
+
 ## 1.0.0 (2026-09-08)
 
 
