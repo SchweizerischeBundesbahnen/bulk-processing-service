@@ -182,6 +182,22 @@ class TestMergeKeepsTheCatalog:
         assert "/StructParents" in pages[0], "The first document keeps its structure"
         assert "/StructParents" not in pages[1], "A page of another document does not point into the structure of the first"
 
+    def test_drops_the_navigation_of_the_first_document(self, tmp_path):
+        writer = PdfWriter(clone_from=PdfReader(io.BytesIO(create_pdf_with_catalog("first"))))
+        writer.add_outline_item("A heading of the first document", 0)
+        writer.add_named_destination("anchor", 0)
+        writer.page_mode = "/UseOutlines"
+        buf = io.BytesIO()
+        writer.write(buf)
+        paths = [_write_pdf_file(tmp_path, "a.pdf", buf.getvalue()), _write_pdf_file(tmp_path, "b.pdf", create_pdf_with_catalog("second"))]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        root = PdfReader(output).trailer["/Root"]
+        assert "/Outlines" not in root, "The bookmarks of the first document do not stand for the whole merge"
+        assert "/Names" not in root
+        assert "/PageMode" not in root
+        _assert_keeps_the_catalog(output.read_bytes())
+
     def test_cover_keeps_the_catalog_of_the_content(self):
         result = replace_first_page_with_cover(create_pdf_with_catalog("content", placeholder=True), create_test_pdf("cover"))
         _assert_keeps_the_catalog(result)
