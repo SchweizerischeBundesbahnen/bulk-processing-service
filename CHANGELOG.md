@@ -1,5 +1,57 @@
 # Changelog
 
+## [1.1.0](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/compare/v1.0.0...v1.1.0) (2026-10-05)
+
+
+### Features
+
+* merge the structure of tagged documents ([#18](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/issues/18)) ([9b4c0c6](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/9b4c0c692f4f2dea7cfe73771446e2590175754d))
+
+
+### Bug Fixes
+
+* **deps:** update dependency coverage to v7.16.1 ([ee982ad](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/ee982ad1a94da8bc54c9fd955f8b4b95d1107814))
+* **deps:** update dependency coverage to v7.16.2 ([baa9d44](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/baa9d4497d971695ad85163ea521c33cd29b6e9d))
+* **deps:** update dependency fastapi to v0.142.1 ([45b92a4](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/45b92a44ffcace05d1f01688becf94871fc839c1))
+* **deps:** update dependency fastapi to v0.142.2 ([ac645b1](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/ac645b1d1ee95a64cd3d7a55b95ebc82b98a83b6))
+* **deps:** update dependency mypy to v2.4.0 ([97f9d79](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/97f9d7942781b792a2261a4e389079531e1aaf3d))
+* **deps:** update dependency pypdf to v6.18.0 ([7639b5d](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/7639b5d73dffaa9bfd18092bc7352ce4c17d2361))
+* **deps:** update dependency pypdf to v6.18.1 ([de837c8](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/de837c80c14639ea208ec3415116f1b865eb4422))
+* **deps:** update dependency pypdf to v6.19.0 ([a0e5c7e](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/a0e5c7e1cd1bff09997c5f374d957be28d429d9c))
+* **deps:** update dependency pytest-mock to v3.16.0 ([7fda3a1](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/7fda3a1cfe82c8b0925ea1a19d4230fecf6f443a))
+* **deps:** update dependency ruff to v0.16.10 ([7870ae6](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/7870ae6c1f967a9fcd541bf9ea1e829f44f0f806))
+* **deps:** update dependency ruff to v0.16.7 ([2a7c79b](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/2a7c79b3beaf0735acde81ada4d1dfa718891cc6))
+* **deps:** update dependency ruff to v0.16.8 ([e7b59e7](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/e7b59e72ecf36c6821d85857ccce8103d0fb1588))
+* **deps:** update dependency ruff to v0.16.9 ([c251c0d](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/c251c0d7219b7dced7b7f57af2310e5e0cb60941))
+* **deps:** update dependency tox to v4.61.4 ([f892e61](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/f892e61901e0eba0f5af7e193c4998c34bc91fde))
+* **deps:** update dependency tox to v4.61.5 ([83a3879](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/83a3879902aff1a0dcf34bff78ba8c7c428aa6b9))
+* **deps:** update dependency tox to v4.63.0 ([2698317](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/26983174c5ee99db7ee95947381133ff821eec88))
+* **deps:** update dependency tox to v4.64.1 ([7b00e90](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/7b00e9004f86dbd236f6f4c98cfd0cfd991721dc))
+* **deps:** update dependency tox to v4.64.2 ([4dd9ae5](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/4dd9ae52465abb5be864fe206381f303205baeb4))
+* **deps:** update dependency tox to v4.64.3 ([658e065](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/658e065e67a2580dedc2523972813d4e43eb99e1))
+* **deps:** update dependency tox to v4.64.4 ([5e34f95](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/5e34f95ee9c071490875ef5dcbb8d87fcb3595e0))
+* **deps:** update dependency tox to v4.64.5 ([c644578](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/c6445786474d576e6e51247916e9c8aad508eec9))
+* **deps:** update dependency tox to v4.64.6 ([35d1964](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/35d1964eed00e4294aba2d199636f63336620fc2))
+* **deps:** update dependency tox to v4.64.7 ([1d3c9ec](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/1d3c9ec7b98e9b31544014329d9288428404eab0))
+* **deps:** update dependency tox-uv to v1.36.1 ([7d68378](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/7d6837870423ff8d7c82ccb4190458ca238d9c2b))
+* **deps:** update dependency uvicorn to v0.53.0 ([cf16695](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/cf16695f00da398c75959147b80eb172717e1c23))
+* **deps:** update dependency uvicorn to v0.54.0 ([f695b52](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/f695b526bf3d2906b1896c48df6e9a64d35884a7))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.11 ([628409d](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/628409d5cd6e03651ab76872d975b1c7d9cbcef1))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.12 ([99a5e98](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/99a5e9836af8336d14c839950147b8eec190f4c0))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.13 ([c29adc0](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/c29adc000073985c4151dd1ab4d0837f1164b631))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.14 ([7c811c1](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/7c811c1b78b366b55034cdf7e2019e34123b0854))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.15 ([d60f4dd](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/d60f4ddf1f848d077078fb99bd3fa6435e2a0dde))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.16 ([331ea53](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/331ea530a45c6e1cc832535584a7d04351e0ad33))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.17 ([b7afffe](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/b7afffe014b9ceca3861f992f723efae08d3fdcf))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.18 ([fcd3547](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/fcd3547c5fd266259478e6f23156cb91615f78c0))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.19 ([fcf74fb](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/fcf74fbaa28c67fa75eb4555be58f5100b59b93e))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.20 ([73394a3](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/73394a39ba74081a19c513ba3de2de6bb2702c27))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.21 ([0659bf3](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/0659bf32e25f89b7c5cf23aa00760b7662f5245b))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.22 ([395e0f4](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/395e0f451346cf2c7f4004e8acf0473e0d496a3d))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.23 ([4c3d21d](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/4c3d21dcb253910d17f6443ed0605f79177d8707))
+* **deps:** update python:3.14.7-alpine docker digest to 9e9fde4 ([632455d](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/632455dcf773c890f0b3e298e01f22b69abb9c7f))
+* keep the catalog of a document when merging ([#17](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/issues/17)) ([d36f386](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/d36f386ffd3d656e07993d4aa4564b82db55ae47))
+
 ## 1.0.0 (2026-09-08)
 
 
