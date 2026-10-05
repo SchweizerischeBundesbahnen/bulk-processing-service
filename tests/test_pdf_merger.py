@@ -325,6 +325,7 @@ def _structure(pdf_data: bytes) -> dict:
     tree_keys = [int(nums[index]) for index in range(0, len(nums), 2)]
     pointed_at: set = set()
     elements: list = []
+    pageless: list = []
 
     def walk(element: object) -> None:
         if not isinstance(element, pikepdf.Dictionary):
@@ -334,6 +335,9 @@ def _structure(pdf_data: bytes) -> dict:
         if "/S" in element:
             elements.append(element)
         kids = element.get("/K")
+        marked = [kid for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]) if isinstance(kid, int)]
+        if marked and "/Pg" not in element:
+            pageless.append(element)
         for kid in kids if isinstance(kids, pikepdf.Array) else [kids] if kids is not None else []:
             walk(kid)
 
@@ -346,6 +350,7 @@ def _structure(pdf_data: bytes) -> dict:
         "tree_keys": tree_keys,
         "next_key": int(root.ParentTreeNextKey) if "/ParentTreeNextKey" in root else None,
         "foreign_pages": pointed_at - set(page_ids),
+        "pageless": pageless,
         "pages_reached": [page_id in pointed_at for page_id in page_ids],
         "document_kids": [kid for kid in document.K if isinstance(kid, pikepdf.Dictionary)],
         "text": [page.extract_text() for page in PdfReader(io.BytesIO(pdf_data)).pages],
@@ -359,6 +364,7 @@ def _assert_whole(structure: dict) -> None:
     assert sorted(keys) == sorted(structure["tree_keys"]), "The parent tree holds the keys of the pages and of nothing else"
     assert structure["next_key"] == max(keys) + 1
     assert not structure["foreign_pages"], "No element points at a page which is not in the document"
+    assert not structure["pageless"], "No element holds marked content without the page it is on"
     assert all(structure["pages_reached"]), "Every page is reached from the structure"
 
 
@@ -393,6 +399,14 @@ class TestMergeTheStructure:
         assert "Cover of the document" in structure["text"][0]
         assert all("page to be removed" not in text for text in structure["text"]), "The placeholder is gone"
         assert structure["document_kids"][0].Pg.objgen == structure["pdf"].pages[0].obj.objgen, "The structure of the cover comes first, as its page does"
+
+    def test_takes_only_the_structure_of_the_first_page_of_a_longer_cover(self):
+        result = replace_first_page_with_cover(_tagged("content"), _tagged("long-cover"))
+        structure = _structure(result)
+        _assert_whole(structure)
+        assert structure["pages"] == 3
+        one_page_cover = _structure(replace_first_page_with_cover(_tagged("content"), _tagged("cover")))
+        assert [str(kid.S) for kid in structure["document_kids"]] == [str(kid.S) for kid in one_page_cover["document_kids"]], "The heading and paragraph of the first page are taken, the paragraph of the second page is left out"
 
     def test_merges_documents_with_their_covers(self, tmp_path):
         paths = [

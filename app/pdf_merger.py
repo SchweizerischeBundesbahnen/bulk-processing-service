@@ -168,13 +168,12 @@ def _copy_entries(target: pikepdf.Pdf, entries: dict[int, pikepdf.Object], sourc
             entries[key + offset] = target.copy_foreign(value)
 
 
-def _copy_elements(target: pikepdf.Pdf, source: pikepdf.Pdf, copies: list[pikepdf.Object], *, at_start: bool) -> None:
-    """Add the elements of the source which are on the copied pages to the Document of the target, at its start or end."""
+def _copy_elements(target: pikepdf.Pdf, source: pikepdf.Pdf, *, at_start: bool) -> None:
+    """Add the elements of the source, pruned to the copied pages, to the Document of the target, at its start or end."""
     target_root = target.Root.StructTreeRoot
     source_root = source.Root.StructTreeRoot
     document = _document_element(target_root)
     copied = target.copy_foreign(_document_element(source_root))
-    _prune(copied, {copy.objgen for copy in copies})
     language = str(source.Root.Lang) if "/Lang" in source.Root else None
     target_language = str(target.Root.Lang) if "/Lang" in target.Root else None
     moved = _list(copied.get("/K"))
@@ -202,6 +201,8 @@ def _add(target: pikepdf.Pdf, source: pikepdf.Pdf, pages: list[pikepdf.Page], *,
         for copy in copies:
             _detach(copy)
         return
+    # Pruned before any of it is copied: qpdf copies a reference to a page it did not copy as null, which reads as no page
+    _prune(_document_element(source_root), {page.obj.objgen for page in pages})
     entries = _number_tree(target_root.ParentTree)
     offset = max(entries, default=-1) + 1
     for copy in copies:
@@ -209,7 +210,7 @@ def _add(target: pikepdf.Pdf, source: pikepdf.Pdf, pages: list[pikepdf.Page], *,
     # The pages are copied first, so that the structure finds them already copied and points at the copies
     _copy_entries(target, entries, _number_tree(source_root.ParentTree), [key for page in pages for key in _keys_of(page.obj)], offset)
     _write_number_tree(target, target_root, entries)
-    _copy_elements(target, source, copies, at_start=at_start)
+    _copy_elements(target, source, at_start=at_start)
 
 
 def _merge_maps(target_root: pikepdf.Object, source_root: pikepdf.Object) -> None:
