@@ -81,9 +81,9 @@ def create_pdf_with_catalog(text: str = "tagged content", placeholder: bool = Fa
     return buf.getvalue()
 
 
-def _assert_keeps_the_catalog(pdf: bytes) -> None:
+def _assert_keeps_the_catalog(pdf: bytes, keys: tuple[str, ...] = CATALOG_KEYS) -> None:
     reader = PdfReader(io.BytesIO(pdf))
-    for key in CATALOG_KEYS:
+    for key in keys:
         assert key in reader.trailer["/Root"], f"The merge keeps {key} of the catalog"
     assert "/ID" in reader.trailer, "The merge keeps the file identifier"
 
@@ -299,3 +299,132 @@ class TestResolveCoverPagePlaceholders:
         assert resolve_cover_page_placeholders(html, 5) == "5 pages"
         # Different document with 12 pages
         assert resolve_cover_page_placeholders(html, 12) == "12 pages"
+
+
+TAGGED = pathlib.Path(__file__).parent / "resources" / "tagged"
+
+
+def _tagged(name: str) -> bytes:
+    """A PDF/UA-1 document as WeasyPrint writes it: a Document element, a flat parent tree, links with structure parents."""
+    return (TAGGED / f"{name}.pdf").read_bytes()
+
+
+def _structure(pdf_data: bytes) -> dict:
+    """What a check of a tagged document needs of it: the keys into its parent tree, and what its elements point at."""
+    import pikepdf
+
+    pdf = pikepdf.open(io.BytesIO(pdf_data))
+    root = pdf.Root.StructTreeRoot
+    page_ids = [page.obj.objgen for page in pdf.pages]
+    page_keys = []
+    for page in pdf.pages:
+        keys = [int(page.obj.StructParents)] if "/StructParents" in page.obj else []
+        keys += [int(annotation.StructParent) for annotation in page.obj.get("/Annots", []) if "/StructParent" in annotation]
+        page_keys.append(keys)
+    nums = root.ParentTree.Nums
+    tree_keys = [int(nums[index]) for index in range(0, len(nums), 2)]
+    pointed_at: set = set()
+    elements: list = []
+    pageless: list = []
+
+    def walk(element: object) -> None:
+        if not isinstance(element, pikepdf.Dictionary):
+            return
+        if "/Pg" in element:
+            pointed_at.add(element.Pg.objgen)
+        if "/S" in element:
+            elements.append(element)
+        kids = element.get("/K")
+        marked = [kid for kid in (kids if isinstance(kids, pikepdf.Array) else [kids]) if isinstance(kid, int)]
+        if marked and "/Pg" not in element:
+            pageless.append(element)
+        for kid in kids if isinstance(kids, pikepdf.Array) else [kids] if kids is not None else []:
+            walk(kid)
+
+    document = root.K[0]
+    walk(document)
+    return {
+        "pdf": pdf,  # kept open, as the elements below belong to it
+        "pages": len(page_ids),
+        "page_keys": page_keys,
+        "tree_keys": tree_keys,
+        "next_key": int(root.ParentTreeNextKey) if "/ParentTreeNextKey" in root else None,
+        "foreign_pages": pointed_at - set(page_ids),
+        "pageless": pageless,
+        "pages_reached": [page_id in pointed_at for page_id in page_ids],
+        "document_kids": [kid for kid in document.K if isinstance(kid, pikepdf.Dictionary)],
+        "text": [page.extract_text() for page in PdfReader(io.BytesIO(pdf_data)).pages],
+    }
+
+
+def _assert_whole(structure: dict) -> None:
+    """Every key of a page is in the parent tree, every entry belongs to a page, and the elements point at pages of the document only."""
+    keys = [key for keys in structure["page_keys"] for key in keys]
+    assert len(keys) == len(set(keys)), "No two pages share a key into the parent tree"
+    assert sorted(keys) == sorted(structure["tree_keys"]), "The parent tree holds the keys of the pages and of nothing else"
+    assert structure["next_key"] == max(keys) + 1
+    assert not structure["foreign_pages"], "No element points at a page which is not in the document"
+    assert not structure["pageless"], "No element holds marked content without the page it is on"
+    assert all(structure["pages_reached"]), "Every page is reached from the structure"
+
+
+class TestMergeTheStructure:
+    def test_merges_the_structure_of_every_document(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, "rich.pdf", _tagged("rich")), _write_pdf_file(tmp_path, "second.pdf", _tagged("second"))]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        structure = _structure(output.read_bytes())
+        _assert_whole(structure)
+        assert structure["pages"] == 3
+        rich = _structure(_tagged("rich"))
+        assert len(structure["document_kids"]) == len(rich["document_kids"]) + len(_structure(_tagged("second"))["document_kids"])
+        # PDF/UA asks for no output intent, which PDF/A does
+        _assert_keeps_the_catalog(output.read_bytes(), ("/Metadata", "/Lang", "/MarkInfo", "/StructTreeRoot", "/ViewerPreferences"))
+
+    def test_marks_the_language_of_a_document_which_differs(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, "rich.pdf", _tagged("rich")), _write_pdf_file(tmp_path, "second.pdf", _tagged("second"))]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        merged = _structure(output.read_bytes())
+        kids = merged["document_kids"]
+        own = len(_structure(_tagged("rich"))["document_kids"])
+        assert all("/Lang" not in kid for kid in kids[:own]), "The elements of the first document keep the language of the merge"
+        assert all(str(kid.Lang) == "en" for kid in kids[own:]), "The elements of the English document state their language in a German merge"
+
+    def test_cover_takes_the_place_of_the_placeholder_in_the_structure(self):
+        result = replace_first_page_with_cover(_tagged("content"), _tagged("cover"))
+        structure = _structure(result)
+        _assert_whole(structure)
+        assert structure["pages"] == 3
+        assert "Cover of the document" in structure["text"][0]
+        assert all("page to be removed" not in text for text in structure["text"]), "The placeholder is gone"
+        assert structure["document_kids"][0].Pg.objgen == structure["pdf"].pages[0].obj.objgen, "The structure of the cover comes first, as its page does"
+
+    def test_takes_only_the_structure_of_the_first_page_of_a_longer_cover(self):
+        result = replace_first_page_with_cover(_tagged("content"), _tagged("long-cover"))
+        structure = _structure(result)
+        _assert_whole(structure)
+        assert structure["pages"] == 3
+        one_page_cover = _structure(replace_first_page_with_cover(_tagged("content"), _tagged("cover")))
+        assert [str(kid.S) for kid in structure["document_kids"]] == [str(kid.S) for kid in one_page_cover["document_kids"]], "The heading and paragraph of the first page are taken, the paragraph of the second page is left out"
+
+    def test_merges_documents_with_their_covers(self, tmp_path):
+        paths = [
+            _write_pdf_file(tmp_path, "a.pdf", replace_first_page_with_cover(_tagged("content"), _tagged("cover"))),
+            _write_pdf_file(tmp_path, "b.pdf", replace_first_page_with_cover(_tagged("content"), _tagged("cover"))),
+        ]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        structure = _structure(output.read_bytes())
+        _assert_whole(structure)
+        assert structure["pages"] == 6
+
+    def test_a_tagged_document_added_to_an_untagged_one_loses_its_keys(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, "plain.pdf", create_test_pdf("plain")), _write_pdf_file(tmp_path, "rich.pdf", _tagged("rich"))]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        reader = PdfReader(output)
+        assert "/StructTreeRoot" not in reader.trailer["/Root"]
+        for page in reader.pages:
+            assert "/StructParents" not in page
+            assert all("/StructParent" not in annotation.get_object() for annotation in page.get("/Annots", []))
