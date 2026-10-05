@@ -5,7 +5,7 @@ import pathlib
 
 import pytest
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from pypdf.generic import ArrayObject, BooleanObject, DecodedStreamObject, DictionaryObject, NameObject, NumberObject, TextStringObject
 
 from app.pdf_merger import count_pdf_pages, merge_pdf_files, replace_first_page_with_cover, resolve_cover_page_placeholders
 
@@ -52,6 +52,40 @@ def create_pdf_with_placeholder() -> bytes:
     buf = io.BytesIO()
     writer.write(buf)
     return buf.getvalue()
+
+
+# What WeasyPrint writes into the catalog of a PDF/A or PDF/UA file, which a merge must not lose
+CATALOG_KEYS = ("/Metadata", "/OutputIntents", "/Lang", "/MarkInfo")
+
+
+def create_pdf_with_catalog(text: str = "tagged content", placeholder: bool = False) -> bytes:
+    """A document as WeasyPrint writes it for a PDF/A or PDF/UA variant: metadata, output intent, language, tagging and an identifier."""
+    writer = PdfWriter()
+    texts = ["page to be removed", text] if placeholder else [text]
+    for index, page_text in enumerate(texts):
+        writer.add_blank_page(width=200, height=200)
+        _add_text_to_page(writer, index, page_text)
+        writer.pages[index][NameObject("/StructParents")] = NumberObject(index)
+    metadata = DecodedStreamObject()
+    metadata.set_data(b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>")
+    metadata[NameObject("/Type")] = NameObject("/Metadata")
+    metadata[NameObject("/Subtype")] = NameObject("/XML")
+    output_intent = DictionaryObject({NameObject("/Type"): NameObject("/OutputIntent"), NameObject("/S"): NameObject("/GTS_PDFA1")})
+    writer._root_object[NameObject("/Metadata")] = writer._add_object(metadata)
+    writer._root_object[NameObject("/OutputIntents")] = ArrayObject([writer._add_object(output_intent)])
+    writer._root_object[NameObject("/Lang")] = TextStringObject("en")
+    writer._root_object[NameObject("/MarkInfo")] = DictionaryObject({NameObject("/Marked"): BooleanObject(True)})
+    writer.generate_file_identifiers()
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def _assert_keeps_the_catalog(pdf: bytes) -> None:
+    reader = PdfReader(io.BytesIO(pdf))
+    for key in CATALOG_KEYS:
+        assert key in reader.trailer["/Root"], f"The merge keeps {key} of the catalog"
+    assert "/ID" in reader.trailer, "The merge keeps the file identifier"
 
 
 def _write_pdf_file(tmp_path: pathlib.Path, name: str, data: bytes) -> pathlib.Path:
@@ -122,6 +156,54 @@ class TestMergePdfFiles:
         merge_pdf_files([p], out)
         reader = PdfReader(out)
         assert len(reader.pages) == 3
+
+
+class TestMergeKeepsTheCatalog:
+    def test_keeps_the_catalog_of_the_first_document(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, f"{index}.pdf", create_pdf_with_catalog(f"document {index}")) for index in range(3)]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        _assert_keeps_the_catalog(output.read_bytes())
+        assert len(PdfReader(output).pages) == 3
+
+    def test_keeps_the_catalog_where_the_first_document_has_a_placeholder(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, "a.pdf", create_pdf_with_catalog("first", placeholder=True)), _write_pdf_file(tmp_path, "b.pdf", create_pdf_with_catalog("second"))]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        _assert_keeps_the_catalog(output.read_bytes())
+        reader = PdfReader(output)
+        assert [page.extract_text() for page in reader.pages] == ["first", "second"]
+
+    def test_pages_of_the_other_documents_point_into_no_structure(self, tmp_path):
+        paths = [_write_pdf_file(tmp_path, f"{index}.pdf", create_pdf_with_catalog(f"document {index}")) for index in range(2)]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        pages = PdfReader(output).pages
+        assert "/StructParents" in pages[0], "The first document keeps its structure"
+        assert "/StructParents" not in pages[1], "A page of another document does not point into the structure of the first"
+
+    def test_drops_the_navigation_of_the_first_document(self, tmp_path):
+        writer = PdfWriter(clone_from=PdfReader(io.BytesIO(create_pdf_with_catalog("first"))))
+        writer.add_outline_item("A heading of the first document", 0)
+        writer.add_named_destination("anchor", 0)
+        writer.page_mode = "/UseOutlines"
+        buf = io.BytesIO()
+        writer.write(buf)
+        paths = [_write_pdf_file(tmp_path, "a.pdf", buf.getvalue()), _write_pdf_file(tmp_path, "b.pdf", create_pdf_with_catalog("second"))]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        root = PdfReader(output).trailer["/Root"]
+        assert "/Outlines" not in root, "The bookmarks of the first document do not stand for the whole merge"
+        assert "/Names" not in root
+        assert "/PageMode" not in root
+        _assert_keeps_the_catalog(output.read_bytes())
+
+    def test_cover_keeps_the_catalog_of_the_content(self):
+        result = replace_first_page_with_cover(create_pdf_with_catalog("content", placeholder=True), create_test_pdf("cover"))
+        _assert_keeps_the_catalog(result)
+        pages = PdfReader(io.BytesIO(result)).pages
+        assert [page.extract_text() for page in pages] == ["cover", "content"]
+        assert "/StructParents" not in pages[0], "The cover, rendered on its own, does not point into the structure of the content"
 
 
 class TestReplaceFirstPageWithCover:
