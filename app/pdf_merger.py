@@ -38,31 +38,58 @@ def _is_placeholder_page(page: PageObject) -> bool:
     return PLACEHOLDER_MARKER in text.lower()
 
 
+def _add_foreign_page(writer: PdfWriter, page: PageObject) -> None:
+    """Add a page of another document, without its link into the structure tree of that document.
+
+    The structure tree of the result is the one of the document it is built on. The structure parents of a page of
+    another document would point into that tree, at elements which are not the page's own.
+    """
+    added = writer.add_page(page)
+    if "/StructParents" in added:
+        del added["/StructParents"]
+
+
 def replace_first_page_with_cover(content_pdf: bytes, cover_pdf: bytes) -> bytes:
+    """Put the first page of the cover in place of the placeholder page of the content.
+
+    The result is built on the content, so it keeps what WeasyPrint wrote into its catalog for the PDF variant asked for:
+    the metadata, the output intent, the structure tree, the language, and the file identifier.
+    """
     content_reader = PdfReader(io.BytesIO(content_pdf))
     cover_reader = PdfReader(io.BytesIO(cover_pdf))
     if not cover_reader.pages:
         msg = "Cover page PDF has no pages"
         raise ValueError(msg)
-    writer = PdfWriter()
-    writer.add_page(cover_reader.pages[0])
     has_placeholder = len(content_reader.pages) > 1 and _is_placeholder_page(content_reader.pages[0])
-    content_pages = content_reader.pages[1:] if has_placeholder else content_reader.pages
-    for page in content_pages:
-        writer.add_page(page)
+    writer = PdfWriter(clone_from=content_reader)
+    if has_placeholder:
+        writer.remove_page(0)
+    cover = writer.insert_page(cover_reader.pages[0], 0)
+    if "/StructParents" in cover:
+        del cover["/StructParents"]
     output = io.BytesIO()
     writer.write(output)
     return output.getvalue()
 
 
 def merge_pdf_files(pdf_paths: list[pathlib.Path], output_path: pathlib.Path) -> None:
-    writer = PdfWriter()
+    """Merge the documents into one, in their order.
+
+    The result is built on the first document, so it keeps what WeasyPrint wrote into its catalog for the PDF variant
+    asked for: the metadata, the output intent, the language and the file identifier, which a PDF/A or PDF/UA file needs.
+    The pages of the other documents are added to it. Their structure trees are not merged, which a tagged variant needs.
+    """
+    writer: PdfWriter | None = None
     for pdf_path in pdf_paths:
         reader = PdfReader(pdf_path)
-        pages = reader.pages
-        if len(pages) > 1 and _is_placeholder_page(pages[0]):
-            pages = pages[1:]
+        skip_placeholder = len(reader.pages) > 1 and _is_placeholder_page(reader.pages[0])
+        if writer is None:
+            writer = PdfWriter(clone_from=reader)
+            if skip_placeholder:
+                writer.remove_page(0)
+            continue
+        pages = reader.pages[1:] if skip_placeholder else reader.pages
         for page in pages:
-            writer.add_page(page)
+            _add_foreign_page(writer, page)
     with output_path.open("wb") as f:
-        writer.write(f)
+        (writer or PdfWriter()).write(f)
