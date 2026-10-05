@@ -25,6 +25,12 @@ STRUCT_PARENT = "/StructParent"
 # The navigation of a document: its bookmarks and named destinations, and whether a viewer opens with the bookmarks shown
 NAVIGATION = ("/Outlines", "/Names")
 
+# The root of the structure of a document, which only a tagged document has
+STRUCT_TREE_ROOT = "/StructTreeRoot"
+
+# The language of a document, or of an element of its structure
+LANG = "/Lang"
+
 
 def count_pdf_pages(pdf_data: bytes) -> int:
     reader = PdfReader(io.BytesIO(pdf_data))
@@ -133,7 +139,7 @@ def _prune(element: pikepdf.Object, pages: set[tuple[int, int]]) -> bool:
 def _remove_first_page(pdf: pikepdf.Pdf) -> None:
     """Remove the placeholder page, with what the structure holds of it."""
     page = pdf.pages[0].obj
-    root = pdf.Root.get("/StructTreeRoot")
+    root = pdf.Root.get(STRUCT_TREE_ROOT)
     if root is not None:
         entries = _number_tree(root.ParentTree)
         for key in _keys_of(page):
@@ -174,13 +180,13 @@ def _copy_elements(target: pikepdf.Pdf, source: pikepdf.Pdf, *, at_start: bool) 
     source_root = source.Root.StructTreeRoot
     document = _document_element(target_root)
     copied = target.copy_foreign(_document_element(source_root))
-    language = str(source.Root.Lang) if "/Lang" in source.Root else None
-    target_language = str(target.Root.Lang) if "/Lang" in target.Root else None
+    language = str(source.Root.Lang) if LANG in source.Root else None
+    target_language = str(target.Root.Lang) if LANG in target.Root else None
     moved = _list(copied.get("/K"))
     for kid in moved:
         if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
             kid.P = document
-            if language is not None and language != target_language and "/Lang" not in kid:
+            if language is not None and language != target_language and LANG not in kid:
                 kid.Lang = pikepdf.String(language)
     own = _list(document.get("/K"))
     document.K = pikepdf.Array(moved + own if at_start else own + moved)
@@ -194,8 +200,8 @@ def _add(target: pikepdf.Pdf, source: pikepdf.Pdf, pages: list[pikepdf.Page], *,
     and the elements of their content are added to the Document of the target, at its start or end. A page added to a
     target without a structure loses its keys, which would point into nothing.
     """
-    target_root = target.Root.get("/StructTreeRoot")
-    source_root = source.Root.get("/StructTreeRoot")
+    target_root = target.Root.get(STRUCT_TREE_ROOT)
+    source_root = source.Root.get(STRUCT_TREE_ROOT)
     copies = _copy_pages(target, pages, at_start=at_start)
     if target_root is None or source_root is None:
         for copy in copies:
