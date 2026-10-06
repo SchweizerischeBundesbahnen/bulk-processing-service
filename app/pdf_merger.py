@@ -119,11 +119,18 @@ def _document_element(root: pikepdf.Object) -> pikepdf.Object:
 
 
 def _prune(element: pikepdf.Object, pages: set[tuple[int, int]]) -> bool:
-    """Keep only what of an element is on the given pages; whether anything of it is left."""
+    """Keep only what of an element is on the given pages; whether the element is kept.
+
+    An element with content is kept while some of its content is; one without, as an empty cell of a table, is kept
+    unless it stands on a page left out, as dropping it would leave its row a cell short.
+    """
     page = element.get("/Pg")
     on_a_kept_page = page is None or page.objgen in pages
+    kids = _list(element.get("/K"))
+    if not kids:
+        return on_a_kept_page
     kept = pikepdf.Array()
-    for kid in _list(element.get("/K")):
+    for kid in kids:
         if isinstance(kid, pikepdf.Dictionary):
             if "/S" in kid and not _prune(kid, pages):
                 continue

@@ -357,6 +357,39 @@ def _structure(pdf_data: bytes) -> dict:
     }
 
 
+def _cells_per_row(pdf_data: bytes) -> list[list[int]]:
+    """The number of cells of each row, table by table."""
+    import pikepdf
+
+    with pikepdf.open(io.BytesIO(pdf_data)) as pdf:
+        tables: list[list[int]] = []
+
+        def kids(element: pikepdf.Object) -> list:
+            value = element.get("/K")
+            return [] if value is None else list(value) if isinstance(value, pikepdf.Array) else [value]
+
+        def rows(element: pikepdf.Object, found: list[int]) -> None:
+            for kid in kids(element):
+                if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                    if kid.S == "/TR":
+                        found.append(sum(1 for cell in kids(kid) if isinstance(cell, pikepdf.Dictionary) and cell.get("/S") in ("/TD", "/TH")))
+                    else:
+                        rows(kid, found)
+
+        def walk(element: pikepdf.Object) -> None:
+            for kid in kids(element):
+                if isinstance(kid, pikepdf.Dictionary) and "/S" in kid:
+                    if kid.S == "/Table":
+                        found: list[int] = []
+                        rows(kid, found)
+                        tables.append(found)
+                    else:
+                        walk(kid)
+
+        walk(pdf.Root.StructTreeRoot)
+        return tables
+
+
 def _assert_whole(structure: dict) -> None:
     """Every key of a page is in the parent tree, every entry belongs to a page, and the elements point at pages of the document only."""
     keys = [key for keys in structure["page_keys"] for key in keys]
@@ -399,6 +432,24 @@ class TestMergeTheStructure:
         assert "Cover of the document" in structure["text"][0]
         assert all("page to be removed" not in text for text in structure["text"]), "The placeholder is gone"
         assert structure["document_kids"][0].Pg.objgen == structure["pdf"].pages[0].obj.objgen, "The structure of the cover comes first, as its page does"
+
+    def test_keeps_the_empty_cells_of_a_table_added_to_a_merge(self, tmp_path):
+        before = _cells_per_row(_tagged("table"))
+        paths = [_write_pdf_file(tmp_path, "rich.pdf", _tagged("rich")), _write_pdf_file(tmp_path, "table.pdf", _tagged("table"))]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+
+        assert before == [[3, 3, 3]], "The fixture is a regular table of three rows of three cells, some of them empty"
+        assert _cells_per_row(output.read_bytes()) == _cells_per_row(_tagged("rich")) + before, "No empty cell is lost, so the table stays regular"
+
+    def test_keeps_the_empty_cells_of_a_table_under_a_cover(self):
+        """The content starts with the placeholder page, as the PDF Exporter sends it, so its structure is pruned."""
+        content = _tagged("table-content")
+        result = replace_first_page_with_cover(content, _tagged("cover"))
+
+        assert "page to be removed" in PdfReader(io.BytesIO(content)).pages[0].extract_text(), "The fixture starts with the placeholder"
+        assert "page to be removed" not in PdfReader(io.BytesIO(result)).pages[1].extract_text()
+        assert _cells_per_row(result) == [[3, 3, 3]], "The placeholder goes, the empty cells of the table on the next page stay"
 
     def test_takes_only_the_structure_of_the_first_page_of_a_longer_cover(self):
         result = replace_first_page_with_cover(_tagged("content"), _tagged("long-cover"))
