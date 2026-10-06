@@ -106,7 +106,7 @@ def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobM
 async def add_document_with_attachments_to_job(job_id: str, request: Request, job_manager: JobManagerDep) -> dict[str, str]:
     """Add a document which embeds files, as PDF/A-4f requires. The cover page embeds none."""
     # A form field is limited to 1 MB by default, less than the HTML of a large document; the body as a whole has its own limit
-    async with request.form(max_part_size=REQUEST_BODY_LIMIT) as form:
+    async with request.form(max_part_size=REQUEST_BODY_LIMIT) as form:  # NOSONAR False positive - max_part_size is valid parameter
         html = form.get("html")
         if not isinstance(html, str):
             raise HTTPException(status_code=422, detail='Required form field "html" is missing')

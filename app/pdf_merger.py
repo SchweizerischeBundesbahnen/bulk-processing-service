@@ -283,34 +283,53 @@ def _unique_name(name: str, taken: set[str]) -> str:
     return candidate
 
 
+def _embedded_files(pdf: pikepdf.Pdf) -> list[tuple[str, pikepdf.Object]]:
+    names = pdf.Root.get(NAMES)
+    return _name_tree_entries(names[EMBEDDED_FILES]) if names is not None and EMBEDDED_FILES in names else []
+
+
+def _write_embedded_files(pdf: pikepdf.Pdf, entries: list[tuple[str, pikepdf.Object]], associated: list[pikepdf.Object]) -> None:
+    """Write the embedded files as one sorted name tree, and list each associated file once.
+
+    WeasyPrint writes the name tree unsorted and lists each file twice in /AF.
+    """
+    if not entries and not associated:
+        return
+    if NAMES not in pdf.Root:
+        pdf.Root[NAMES] = pikepdf.Dictionary()
+    ordered = sorted(entries, key=lambda entry: entry[0])
+    pdf.Root[NAMES][EMBEDDED_FILES] = pdf.make_indirect(pikepdf.Dictionary({NAMES: pikepdf.Array([item for name, spec in ordered for item in (pikepdf.String(name), spec)])}))
+    listed: set[tuple[int, int]] = set()
+    unique: list[pikepdf.Object] = []
+    for spec in associated:
+        if not spec.is_indirect or spec.objgen not in listed:
+            listed.add(spec.objgen)
+            unique.append(spec)
+    pdf.Root[AF] = pikepdf.Array(unique)
+
+
+def _tidy_embedded_files(pdf: pikepdf.Pdf) -> None:
+    """Rewrite the embedded files of the document a merge is built on, as those of every document it adds are written."""
+    _write_embedded_files(pdf, _embedded_files(pdf), _list(pdf.Root.get(AF)))
+
+
 def _add_embedded_files(target: pikepdf.Pdf, source: pikepdf.Pdf) -> None:
     """Take over the files the source embeds and associates with itself, which PDF/A-4f requires of the merge.
 
-    A name the target already has gets a number, as the names of a name tree are unique; the file keeps its own name. The
-    files are listed in one sorted name tree, and each associated file once.
+    A name the target already has gets a number, as the names of a name tree are unique; the file keeps its own name.
+    A file copied twice is copied once, so the name tree and /AF point at the same copy.
     """
-    source_names = source.Root.get(NAMES)
-    if source_names is None or EMBEDDED_FILES not in source_names:
+    added = _embedded_files(source)
+    if not added:
         return
-    if NAMES not in target.Root:
-        target.Root[NAMES] = pikepdf.Dictionary()
-    target_names = target.Root[NAMES]
-    entries = _name_tree_entries(target_names[EMBEDDED_FILES]) if EMBEDDED_FILES in target_names else []
+    entries = _embedded_files(target)
     taken = {name for name, _ in entries}
-    for name, spec in _name_tree_entries(source_names[EMBEDDED_FILES]):
+    for name, spec in added:
         unique = _unique_name(name, taken)
         taken.add(unique)
         entries.append((unique, target.copy_foreign(spec)))
-    entries.sort(key=lambda entry: entry[0])
-    target_names[EMBEDDED_FILES] = target.make_indirect(pikepdf.Dictionary({NAMES: pikepdf.Array([item for name, spec in entries for item in (pikepdf.String(name), spec)])}))
-    associated = _list(target.Root.get(AF))
-    copied: set[tuple[int, int]] = set()
-    for spec in _list(source.Root.get(AF)):
-        if spec.objgen not in copied:
-            copied.add(spec.objgen)
-            associated.append(target.copy_foreign(spec))
-    if associated:
-        target.Root[AF] = pikepdf.Array(associated)
+    associated = _list(target.Root.get(AF)) + [target.copy_foreign(spec) for spec in _list(source.Root.get(AF))]
+    _write_embedded_files(target, entries, associated)
 
 
 def _save(pdf: pikepdf.Pdf) -> bytes:
@@ -354,6 +373,7 @@ def merge_pdf_files(pdf_paths: list[pathlib.Path], output_path: pathlib.Path) ->
         if merged is None:
             merged = pdf
             _drop_navigation(merged)
+            _tidy_embedded_files(merged)
         else:
             _add(merged, pdf, list(pdf.pages))
             _add_embedded_files(merged, pdf)

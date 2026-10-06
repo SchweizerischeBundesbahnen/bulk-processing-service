@@ -523,11 +523,17 @@ class TestEmbeddedFiles:
         assert files["specs"] <= set(files["associated"]), "Each embedded file is an associated file, as PDF/A-4f requires"
         assert not files["dests"], "The named destinations of the first document are dropped with its bookmarks"
 
-    def test_lists_each_associated_file_of_a_later_document_once(self, tmp_path):
+    def test_lists_each_associated_file_once(self, tmp_path):
         files = _embedded_files(self._merge(tmp_path, _with_attachments("first"), _with_attachments("second")))
 
-        later = files["associated"][2:]
-        assert len(later) == len(set(later)) == 2, "WeasyPrint lists each file twice; the merge takes it once"
+        assert len(files["associated"]) == len(set(files["associated"])) == 3, "WeasyPrint lists each file twice; the merge lists it once"
+
+    def test_tidies_the_embedded_files_of_a_document_merged_alone(self, tmp_path):
+        files = _embedded_files(self._merge(tmp_path, _with_attachments("second")))
+
+        assert _embedded_files(_with_attachments("second"))["names"] == ["notes.txt", "data.csv"], "The fixture is unsorted, as WeasyPrint writes it"
+        assert files["names"] == ["data.csv", "notes.txt"]
+        assert sorted(files["associated"]) == sorted(files["specs"]), "Each file listed once"
 
     def test_takes_the_embedded_files_of_a_later_document_when_the_first_has_none(self, tmp_path):
         files = _embedded_files(self._merge(tmp_path, _tagged("content"), _with_attachments("second")))
