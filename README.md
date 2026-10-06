@@ -133,7 +133,7 @@ Running multiple replicas is possible but requires:
 
 ```
 POST /api/convert/start          → 201, job ID
-POST /api/convert/{id}/add       → 202 (repeat for each document)
+POST /api/convert/{id}/add       → 202 (repeat for each document; add-with-attachments for one which embeds files)
 POST /api/convert/{id}/finish    → 200, merged PDF
 ```
 
@@ -143,6 +143,7 @@ POST /api/convert/{id}/finish    → 200, merged PDF
 |---|---|---|
 | POST | `/api/convert/start` | Create a merge job |
 | POST | `/api/convert/{jobId}/add` | Convert and add a document |
+| POST | `/api/convert/{jobId}/add-with-attachments` | Convert and add a document which embeds files |
 | POST | `/api/convert/{jobId}/finish` | Merge all documents, return PDF |
 | DELETE | `/api/convert/{jobId}` | Delete a job |
 | GET | `/health` | Liveness (storage writable; 503 if not) |
@@ -190,6 +191,18 @@ Response: `202 Accepted`
 ```
 
 On conversion failure: `202 Accepted` with `{"status": "failed"}` — the failure is recorded in job metadata and reported once in `X-Documents-Failed` at `/finish`. The job stays active for the remaining documents.
+
+**POST /api/convert/{jobId}/add-with-attachments**
+
+Request: `multipart/form-data`, for a document which embeds files, as PDF/A-4f requires.
+
+- `html` (required) - document HTML to convert
+- `coverPageHtml` (optional) - cover page HTML, as for `/add`; the cover page embeds no file
+- `params` (optional) - the `params` of `/add`, as a JSON string
+- `files` (optional, repeated) - the files the document embeds, each under its file name
+
+The response is that of `/add`. The merge keeps the files every document embeds. A file whose name another document
+took already is listed under a numbered name and keeps its own file name.
 
 **POST /api/convert/{jobId}/finish**
 

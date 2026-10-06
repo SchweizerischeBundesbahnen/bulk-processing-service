@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.models import DocumentConversionParams
-from app.weasyprint_client import WeasyPrintClient
+from app.weasyprint_client import Attachment, WeasyPrintClient
 
 
 @pytest.fixture
@@ -74,6 +74,26 @@ class TestWeasyPrintClient:
 
         with pytest.raises(httpx.HTTPStatusError):
             client.convert_html_to_pdf("<html></html>", default_params)
+
+    @patch("app.weasyprint_client.httpx.Client")
+    def test_convert_with_attachments_sends_a_multipart_request(self, mock_client_cls, client):
+        mock_response = MagicMock()
+        mock_response.content = b"%PDF"
+        mock_http_client = MagicMock()
+        mock_http_client.post.return_value = mock_response
+        mock_http_client.__enter__ = MagicMock(return_value=mock_http_client)
+        mock_http_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_http_client
+
+        params = DocumentConversionParams(pdf_variant="pdf/a-4f")
+        client.convert_html_to_pdf("<html></html>", params, [Attachment("notes.txt", b"notes"), Attachment("data.csv", b"a,b")])
+
+        call = mock_http_client.post.call_args
+        assert call.args[0] == "http://weasyprint:9080/convert/html-with-attachments"
+        assert call.kwargs["data"] == {"html": "<html></html>"}
+        assert call.kwargs["files"] == [("files", ("notes.txt", b"notes")), ("files", ("data.csv", b"a,b"))]
+        assert call.kwargs["params"]["pdf_variant"] == "pdf/a-4f"
+        assert "Content-Type" not in call.kwargs["headers"], "httpx sets it, with the boundary of the parts"
 
     def test_trailing_slash_stripped(self):
         client = WeasyPrintClient(base_url="http://weasyprint:9080/")

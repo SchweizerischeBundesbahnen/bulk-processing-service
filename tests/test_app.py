@@ -11,6 +11,7 @@ from app import app as app_module
 from app.app import app
 from app.job_manager import JobManager
 from app.models import JobStatus
+from app.weasyprint_client import Attachment
 
 
 @pytest.fixture
@@ -157,10 +158,13 @@ class TestAddDocumentToJob:
 
         job_id = _start_job(client)
 
-        response = client.post(f"/api/convert/{job_id}/add", json={
-            "html": "<html></html>",
-            "params": {"scaleFactor": "3", "customMetadata": True, "pdfVariant": "pdf/a-1b"},
-        })
+        response = client.post(
+            f"/api/convert/{job_id}/add",
+            json={
+                "html": "<html></html>",
+                "params": {"scaleFactor": "3", "customMetadata": True, "pdfVariant": "pdf/a-1b"},
+            },
+        )
         assert response.status_code == 202
 
         # Verify WeasyPrint was called with per-doc params, not defaults
@@ -217,6 +221,79 @@ class TestAddDocumentToJob:
         response = client.post(f"/api/convert/{job_id}/add", json={"html": "<html>more</html>"})
         assert response.status_code == 409
         assert "not active" in response.json()["detail"]
+
+
+class TestAddDocumentWithAttachmentsToJob:
+    def _add(self, client, job_id, data, files=None):
+        return client.post(f"/api/convert/{job_id}/add-with-attachments", data=data, files=files or [])
+
+    @patch("app.converter_controller.get_weasyprint_client")
+    def test_renders_the_document_with_its_attachments(self, mock_get_client, client):
+        mock_client = mock_get_client.return_value
+        mock_client.convert_html_to_pdf.return_value = SAMPLE_PDF
+        job_id = _start_job(client)
+
+        response = self._add(
+            client,
+            job_id,
+            {"html": "<html>content</html>", "params": '{"pdfVariant": "pdf/a-4f", "scaleFactor": "2"}'},
+            [("files", ("notes.txt", b"notes")), ("files", ("data.csv", b"a,b"))],
+        )
+
+        assert response.status_code == 202
+        assert response.json() == {"status": "accepted"}
+        html, params, attachments = mock_client.convert_html_to_pdf.call_args.args
+        assert html == "<html>content</html>"
+        assert (params.pdf_variant, params.scale_factor) == ("pdf/a-4f", "2")
+        assert attachments == [Attachment("notes.txt", b"notes"), Attachment("data.csv", b"a,b")]
+        assert _job_manager().get_job_metadata(job_id).pdf_count == 1
+
+    @patch("app.converter_controller.replace_first_page_with_cover", return_value=SAMPLE_PDF)
+    @patch("app.converter_controller.count_pdf_pages", return_value=3)
+    @patch("app.converter_controller.get_weasyprint_client")
+    def test_renders_the_cover_page_without_the_attachments(self, mock_get_client, _mock_count_pages, _mock_replace, client):
+        mock_client = mock_get_client.return_value
+        mock_client.convert_html_to_pdf.side_effect = [b"content_pdf", b"cover_pdf"]
+        job_id = _start_job(client)
+
+        response = self._add(client, job_id, {"html": "<html>content</html>", "coverPageHtml": "<html>{{ PAGES_TOTAL_COUNT }}</html>"}, [("files", ("notes.txt", b"notes"))])
+
+        assert response.status_code == 202
+        content_call, cover_call = mock_client.convert_html_to_pdf.call_args_list
+        assert content_call.args[2] == [Attachment("notes.txt", b"notes")]
+        assert cover_call.args[0] == "<html>3</html>"
+        assert len(cover_call.args) == 2, "The cover page embeds nothing"
+
+    @patch("app.converter_controller.get_weasyprint_client")
+    def test_takes_an_html_larger_than_the_default_limit_of_a_form_field(self, mock_get_client, client):
+        mock_get_client.return_value.convert_html_to_pdf.return_value = SAMPLE_PDF
+        job_id = _start_job(client)
+        html = "<html>" + "x" * (2 * 1024 * 1024) + "</html>"
+
+        response = self._add(client, job_id, {"html": html}, [("files", ("notes.txt", b"notes"))])
+
+        assert response.status_code == 202
+        assert mock_get_client.return_value.convert_html_to_pdf.call_args.args[0] == html
+
+    def test_rejects_a_form_without_html(self, client):
+        job_id = _start_job(client)
+
+        response = self._add(client, job_id, {"coverPageHtml": "<html></html>"}, [("files", ("notes.txt", b"notes"))])
+
+        assert response.status_code == 422
+
+    def test_rejects_params_which_are_not_valid(self, client):
+        job_id = _start_job(client)
+
+        response = self._add(client, job_id, {"html": "<html></html>", "params": "{not json"}, [("files", ("notes.txt", b"notes"))])
+
+        assert response.status_code == 422
+        assert "params" in response.json()["detail"]
+
+    def test_job_not_found(self, client):
+        response = self._add(client, "0" * 32, {"html": "<html></html>"}, [("files", ("notes.txt", b"notes"))])
+
+        assert response.status_code == 404
 
 
 class TestBodySizeLimit:
@@ -282,7 +359,7 @@ class TestFinishMergeJob:
         response = client.post(f"/api/convert/{job_id}/finish")
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
-        assert "filename=\"result.pdf\"" in response.headers["content-disposition"]
+        assert 'filename="result.pdf"' in response.headers["content-disposition"]
         assert "filename*=UTF-8''result.pdf" in response.headers["content-disposition"]
         assert response.headers["x-documents-merged"] == "2"
         assert "x-documents-failed" not in response.headers
@@ -429,11 +506,14 @@ class TestSSRFAndVersionContract:
 
     def test_unknown_fields_in_start_ignored(self, client):
         """weasyPrintServiceUrl or any extra field must not be accepted."""
-        response = client.post("/api/convert/start", json={
-            "fileName": "test.pdf",
-            "weasyPrintServiceUrl": "http://evil.attacker.com:9080",
-            "extraField": "should be ignored",
-        })
+        response = client.post(
+            "/api/convert/start",
+            json={
+                "fileName": "test.pdf",
+                "weasyPrintServiceUrl": "http://evil.attacker.com:9080",
+                "extraField": "should be ignored",
+            },
+        )
         assert response.status_code == 201
         job_id = response.json()["jobId"]
         metadata = _job_manager().get_job_metadata(job_id)

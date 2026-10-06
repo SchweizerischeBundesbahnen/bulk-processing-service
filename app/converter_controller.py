@@ -7,14 +7,17 @@ from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
+from starlette.datastructures import UploadFile
 
 from app.auth import require_api_key
-from app.constants import WEASYPRINT_API_KEY, WEASYPRINT_SERVICE_URL, WEASYPRINT_SERVICE_URL_DEFAULT, WEASYPRINT_TIMEOUT, sanitize_for_log
+from app.constants import REQUEST_BODY_LIMIT, WEASYPRINT_API_KEY, WEASYPRINT_SERVICE_URL, WEASYPRINT_SERVICE_URL_DEFAULT, WEASYPRINT_TIMEOUT, sanitize_for_log
 from app.job_manager import JobManager
-from app.models import AddDocumentRequest, MergeJobStartParams  # noqa: TC001
+from app.models import AddDocumentRequest, DocumentConversionParams, MergeJobStartParams
 from app.pdf_merger import count_pdf_pages, replace_first_page_with_cover, resolve_cover_page_placeholders
-from app.weasyprint_client import WeasyPrintClient
+from app.weasyprint_client import Attachment, WeasyPrintClient
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,57 @@ def start_merge_job(params: MergeJobStartParams, job_manager: JobManagerDep) -> 
     },
 )
 def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobManagerDep) -> dict[str, str]:
+    return _add_document(job_id, job_manager, body)
+
+
+@router.post(
+    "/{job_id}/add-with-attachments",
+    status_code=202,
+    responses={
+        404: {"description": "Job not found"},
+        409: {"description": "Job is not active"},
+        422: {"description": "The form has no html field, or its params are not valid"},
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "description": "multipart/form-data: html, the document; coverPageHtml, its cover page; params, its conversion parameters as JSON; files, the files the document embeds.",
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "html": {"type": "string"},
+                            "coverPageHtml": {"type": "string"},
+                            "params": {"type": "string", "description": "DocumentConversionParams as JSON"},
+                            "files": {"type": "array", "items": {"type": "string", "format": "binary"}},
+                        },
+                        "required": ["html"],
+                    }
+                }
+            },
+        }
+    },
+)
+async def add_document_with_attachments_to_job(job_id: str, request: Request, job_manager: JobManagerDep) -> dict[str, str]:
+    """Add a document which embeds files, as PDF/A-4f requires. The cover page embeds none."""
+    # A form field is limited to 1 MB by default, less than the HTML of a large document; the body as a whole has its own limit
+    async with request.form(max_part_size=REQUEST_BODY_LIMIT) as form:  # NOSONAR False positive - max_part_size is valid parameter
+        html = form.get("html")
+        if not isinstance(html, str):
+            raise HTTPException(status_code=422, detail='Required form field "html" is missing')
+        cover_page_html = form.get("coverPageHtml")
+        params_json = form.get("params")
+        try:
+            params = DocumentConversionParams.model_validate_json(params_json) if isinstance(params_json, str) else DocumentConversionParams()
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=f"Form field 'params' is not valid: {e}") from e
+        attachments = [Attachment(file.filename or "attachment", await file.read()) for file in form.getlist("files") if isinstance(file, UploadFile)]
+    body = AddDocumentRequest(html=html, cover_page_html=cover_page_html if isinstance(cover_page_html, str) else None, params=params)
+    return await run_in_threadpool(_add_document, job_id, job_manager, body, attachments)
+
+
+def _add_document(job_id: str, job_manager: JobManager, body: AddDocumentRequest, attachments: list[Attachment] | None = None) -> dict[str, str]:
     try:
         metadata = job_manager.get_job_metadata(job_id)
     except KeyError:
@@ -77,7 +131,7 @@ def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobM
 
     client = get_weasyprint_client()
     try:
-        content_pdf = client.convert_html_to_pdf(body.html, body.params)
+        content_pdf = client.convert_html_to_pdf(body.html, body.params, attachments or ())
         if body.cover_page_html:
             page_count = count_pdf_pages(content_pdf)
             cover_html = resolve_cover_page_placeholders(body.cover_page_html, page_count)

@@ -22,8 +22,17 @@ STRUCT_PARENTS = "/StructParents"
 # The key of an annotation, as a link, into the parent tree of the structure: the element it belongs to
 STRUCT_PARENT = "/StructParent"
 
-# The navigation of a document: its bookmarks and named destinations, and whether a viewer opens with the bookmarks shown
-NAVIGATION = ("/Outlines", "/Names")
+# The bookmarks of a document
+OUTLINES = "/Outlines"
+
+# The name trees of a document, as its named destinations and its embedded files
+NAMES = "/Names"
+
+# The name tree of the files a document embeds, which PDF/A-4f requires
+EMBEDDED_FILES = "/EmbeddedFiles"
+
+# The files associated with a document, which PDF/A-4f requires to list each file it embeds
+AF = "/AF"
 
 # The root of the structure of a document, which only a tagged document has
 STRUCT_TREE_ROOT = "/StructTreeRoot"
@@ -240,12 +249,87 @@ def _merge_maps(target_root: pikepdf.Object, source_root: pikepdf.Object) -> Non
 
 
 def _drop_navigation(pdf: pikepdf.Pdf) -> None:
-    """Remove the bookmarks and named destinations a merge took over from its first document, which describe that document alone."""
-    for key in NAVIGATION:
-        if key in pdf.Root:
-            del pdf.Root[key]
+    """Remove the bookmarks and named destinations a merge took over from its first document, which describe that document alone.
+
+    The embedded files stay: they belong to the merge.
+    """
+    if OUTLINES in pdf.Root:
+        del pdf.Root[OUTLINES]
+    if NAMES in pdf.Root:
+        embedded_files = pdf.Root[NAMES].get(EMBEDDED_FILES)
+        if embedded_files is None:
+            del pdf.Root[NAMES]
+        else:
+            pdf.Root[NAMES] = pikepdf.Dictionary({EMBEDDED_FILES: embedded_files})
     if pdf.Root.get("/PageMode") == pikepdf.Name.UseOutlines:
         del pdf.Root["/PageMode"]
+
+
+def _name_tree_entries(node: pikepdf.Object) -> list[tuple[str, pikepdf.Object]]:
+    """The entries of a name tree in the order it stores them. WeasyPrint does not sort them, so a lookup by name may miss one."""
+    names = _list(node.get(NAMES))
+    entries = [(str(names[index]), names[index + 1]) for index in range(0, len(names) - 1, 2)]
+    for kid in _list(node.get("/Kids")):
+        entries.extend(_name_tree_entries(kid))
+    return entries
+
+
+def _unique_name(name: str, taken: set[str]) -> str:
+    candidate = name
+    number = 2
+    while candidate in taken:
+        candidate = f"{name} ({number})"
+        number += 1
+    return candidate
+
+
+def _embedded_files(pdf: pikepdf.Pdf) -> list[tuple[str, pikepdf.Object]]:
+    names = pdf.Root.get(NAMES)
+    return _name_tree_entries(names[EMBEDDED_FILES]) if names is not None and EMBEDDED_FILES in names else []
+
+
+def _write_embedded_files(pdf: pikepdf.Pdf, entries: list[tuple[str, pikepdf.Object]], associated: list[pikepdf.Object]) -> None:
+    """Write the embedded files as one sorted name tree, and list each associated file once.
+
+    WeasyPrint writes the name tree unsorted and lists each file twice in /AF.
+    """
+    if not entries and not associated:
+        return
+    if NAMES not in pdf.Root:
+        pdf.Root[NAMES] = pikepdf.Dictionary()
+    ordered = sorted(entries, key=lambda entry: entry[0])
+    pdf.Root[NAMES][EMBEDDED_FILES] = pdf.make_indirect(pikepdf.Dictionary({NAMES: pikepdf.Array([item for name, spec in ordered for item in (pikepdf.String(name), spec)])}))
+    listed: set[tuple[int, int]] = set()
+    unique: list[pikepdf.Object] = []
+    for spec in associated:
+        if not spec.is_indirect or spec.objgen not in listed:
+            listed.add(spec.objgen)
+            unique.append(spec)
+    pdf.Root[AF] = pikepdf.Array(unique)
+
+
+def _tidy_embedded_files(pdf: pikepdf.Pdf) -> None:
+    """Rewrite the embedded files of the document a merge is built on, as those of every document it adds are written."""
+    _write_embedded_files(pdf, _embedded_files(pdf), _list(pdf.Root.get(AF)))
+
+
+def _add_embedded_files(target: pikepdf.Pdf, source: pikepdf.Pdf) -> None:
+    """Take over the files the source embeds and associates with itself, which PDF/A-4f requires of the merge.
+
+    A name the target already has gets a number, as the names of a name tree are unique; the file keeps its own name.
+    A file copied twice is copied once, so the name tree and /AF point at the same copy.
+    """
+    added = _embedded_files(source)
+    if not added:
+        return
+    entries = _embedded_files(target)
+    taken = {name for name, _ in entries}
+    for name, spec in added:
+        unique = _unique_name(name, taken)
+        taken.add(unique)
+        entries.append((unique, target.copy_foreign(spec)))
+    associated = _list(target.Root.get(AF)) + [target.copy_foreign(spec) for spec in _list(source.Root.get(AF))]
+    _write_embedded_files(target, entries, associated)
 
 
 def _save(pdf: pikepdf.Pdf) -> bytes:
@@ -277,8 +361,8 @@ def merge_pdf_files(pdf_paths: list[pathlib.Path], output_path: pathlib.Path) ->
 
     The result is built on the first document, so it keeps what WeasyPrint wrote into its catalog for the PDF variant
     asked for: the metadata, the output intent, the language and the file identifier, which a PDF/A or PDF/UA file needs.
-    The other documents are added with their structure, which a tagged variant needs. The navigation of the first document
-    is dropped, as its bookmarks would stand for the whole merge.
+    The other documents are added with their structure, which a tagged variant needs. The files each document embeds are kept,
+    which PDF/A-4f needs. The navigation of the first document is dropped, as its bookmarks would stand for the whole merge.
     """
     merged: pikepdf.Pdf | None = None
     for pdf_path in pdf_paths:
@@ -289,6 +373,8 @@ def merge_pdf_files(pdf_paths: list[pathlib.Path], output_path: pathlib.Path) ->
         if merged is None:
             merged = pdf
             _drop_navigation(merged)
+            _tidy_embedded_files(merged)
         else:
             _add(merged, pdf, list(pdf.pages))
+            _add_embedded_files(merged, pdf)
     output_path.write_bytes(_save(merged if merged is not None else pikepdf.new()))
