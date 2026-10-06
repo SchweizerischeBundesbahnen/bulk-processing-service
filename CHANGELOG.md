@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/compare/v1.1.0...v1.2.0) (2026-10-06)
+
+
+### Features
+
+* add documents which embed files to a merge ([#21](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/issues/21)) ([9df3c93](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/9df3c937a5869328e2fc7a5ec9cc7e7055166883))
+
+
+### Bug Fixes
+
+* **deps:** update dependency pikepdf to v10.16.0 ([14f7549](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/14f7549d23d364ec3ea7c0f82fd28ea6d39a9eb9))
+* **deps:** update dependency python to v3.14.8 ([eec16a8](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/eec16a8eada65c2d24f25fe95fc01c26b4f8b987))
+* keep the empty cells of a table in a merge ([#19](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/issues/19)) ([cabb401](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/cabb4019f6e08a59e6c9c200654ec3584ae83401))
+
 ## [1.1.0](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/compare/v1.0.0...v1.1.0) (2026-10-05)
 
 
