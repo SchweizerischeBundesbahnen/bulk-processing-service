@@ -444,8 +444,10 @@ class TestMergeTheStructure:
 
     def test_keeps_the_empty_cells_of_a_table_under_a_cover(self):
         """The content starts with the placeholder page, as the PDF Exporter sends it, so its structure is pruned."""
-        result = replace_first_page_with_cover(_tagged("table-content"), _tagged("cover"))
+        content = _tagged("table-content")
+        result = replace_first_page_with_cover(content, _tagged("cover"))
 
+        assert "page to be removed" in PdfReader(io.BytesIO(content)).pages[0].extract_text(), "The fixture starts with the placeholder"
         assert "page to be removed" not in PdfReader(io.BytesIO(result)).pages[1].extract_text()
         assert _cells_per_row(result) == [[3, 3, 3]], "The placeholder goes, the empty cells of the table on the next page stay"
 
