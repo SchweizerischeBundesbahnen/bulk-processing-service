@@ -479,3 +479,72 @@ class TestMergeTheStructure:
         for page in reader.pages:
             assert "/StructParents" not in page
             assert all("/StructParent" not in annotation.get_object() for annotation in page.get("/Annots", []))
+
+
+ATTACHMENTS = pathlib.Path(__file__).parent / "resources" / "attachments"
+
+
+def _with_attachments(name: str) -> bytes:
+    """A PDF/A-4f document as WeasyPrint writes it: its files in an unsorted name tree, each listed twice in /AF."""
+    return (ATTACHMENTS / f"{name}.pdf").read_bytes()
+
+
+def _embedded_files(pdf_data: bytes) -> dict:
+    """The files a document embeds, by their names in its name tree, and the files it associates with itself."""
+    import pikepdf
+
+    pdf = pikepdf.open(io.BytesIO(pdf_data))
+    names = pdf.Root.Names
+    tree = names.EmbeddedFiles.Names
+    files = {str(tree[index]): tree[index + 1] for index in range(0, len(tree), 2)}
+    return {
+        "names": [str(tree[index]) for index in range(0, len(tree), 2)],
+        "content": {name: spec.EF.F.read_bytes().decode() for name, spec in files.items()},
+        "file_names": {name: str(spec.UF) for name, spec in files.items()},
+        "specs": {spec.objgen for spec in files.values()},
+        "associated": [spec.objgen for spec in pdf.Root.get("/AF", [])],
+        "dests": "/Dests" in names,
+    }
+
+
+class TestEmbeddedFiles:
+    def _merge(self, tmp_path: pathlib.Path, *documents: bytes) -> bytes:
+        paths = [_write_pdf_file(tmp_path, f"{index}.pdf", document) for index, document in enumerate(documents)]
+        output = tmp_path / "merged.pdf"
+        merge_pdf_files(paths, output)
+        return output.read_bytes()
+
+    def test_keeps_the_embedded_files_of_every_document(self, tmp_path):
+        files = _embedded_files(self._merge(tmp_path, _with_attachments("first"), _with_attachments("second")))
+
+        assert files["names"] == ["data.csv", "notes.txt", "notes.txt (2)"], "Sorted, and a name taken already gets a number"
+        assert files["content"] == {"data.csv": "a,b\n1,2\n", "notes.txt": "Notes of the first document", "notes.txt (2)": "Notes of the second document"}
+        assert files["file_names"]["notes.txt (2)"] == "notes.txt", "The file keeps its own name"
+        assert files["specs"] <= set(files["associated"]), "Each embedded file is an associated file, as PDF/A-4f requires"
+        assert not files["dests"], "The named destinations of the first document are dropped with its bookmarks"
+
+    def test_lists_each_associated_file_of_a_later_document_once(self, tmp_path):
+        files = _embedded_files(self._merge(tmp_path, _with_attachments("first"), _with_attachments("second")))
+
+        later = files["associated"][2:]
+        assert len(later) == len(set(later)) == 2, "WeasyPrint lists each file twice; the merge takes it once"
+
+    def test_takes_the_embedded_files_of_a_later_document_when_the_first_has_none(self, tmp_path):
+        files = _embedded_files(self._merge(tmp_path, _tagged("content"), _with_attachments("second")))
+
+        assert files["names"] == ["data.csv", "notes.txt"]
+        assert files["specs"] == set(files["associated"])
+
+    def test_merge_without_embedded_files_has_no_name_tree(self, tmp_path):
+        import pikepdf
+
+        merged = pikepdf.open(io.BytesIO(self._merge(tmp_path, _tagged("content"), _tagged("second"))))
+
+        assert "/Names" not in merged.Root
+        assert "/AF" not in merged.Root
+
+    def test_cover_keeps_the_embedded_files_of_the_content(self):
+        files = _embedded_files(replace_first_page_with_cover(_with_attachments("first"), _tagged("cover")))
+
+        assert files["names"] == ["notes.txt"]
+        assert files["specs"] <= set(files["associated"])

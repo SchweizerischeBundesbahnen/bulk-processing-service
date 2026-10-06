@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import ssl
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import httpx
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from app.models import DocumentConversionParams
 
 # Server certificates are verified against the platform trust store, the same
@@ -16,6 +18,13 @@ if TYPE_CHECKING:
 TLS_CONTEXT = ssl.create_default_context()
 
 
+class Attachment(NamedTuple):
+    """A file WeasyPrint embeds into the PDF, under its own name."""
+
+    file_name: str
+    content: bytes
+
+
 class WeasyPrintClient:
     def __init__(self, base_url: str, timeout: float = 300.0, api_key: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -23,8 +32,11 @@ class WeasyPrintClient:
         # API key carried in the X-API-Key header, or None to send none.
         self.api_key = api_key
 
-    def _request_headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "text/html", "Accept": "application/pdf"}
+    def _request_headers(self, content_type: str | None = "text/html") -> dict[str, str]:
+        # A multipart request carries no content type here: httpx sets it, with the boundary of the parts.
+        headers = {"Accept": "application/pdf"}
+        if content_type:
+            headers["Content-Type"] = content_type
         if self.api_key:
             # A key is a reusable credential, so it is only handed to a transport
             # which protects it; over plain http the request is refused instead.
@@ -34,7 +46,8 @@ class WeasyPrintClient:
             headers["X-API-Key"] = self.api_key
         return headers
 
-    def convert_html_to_pdf(self, html_content: str, params: DocumentConversionParams) -> bytes:
+    def convert_html_to_pdf(self, html_content: str, params: DocumentConversionParams, attachments: Sequence[Attachment] = ()) -> bytes:
+        """Render the HTML to a PDF, which embeds the attachments, if there are any."""
         query_params: dict[str, str | bool] = {
             "presentational_hints": params.presentational_hints,
             "custom_metadata": params.custom_metadata,
@@ -46,11 +59,20 @@ class WeasyPrintClient:
             query_params["scale_factor"] = params.scale_factor
 
         with httpx.Client(timeout=self.timeout, verify=TLS_CONTEXT) as client:
-            response = client.post(
-                f"{self.base_url}/convert/html",
-                content=html_content.encode("utf-8"),
-                headers=self._request_headers(),
-                params=query_params,
-            )
+            if attachments:
+                response = client.post(
+                    f"{self.base_url}/convert/html-with-attachments",
+                    data={"html": html_content},
+                    files=[("files", (attachment.file_name, attachment.content)) for attachment in attachments],
+                    headers=self._request_headers(None),
+                    params=query_params,
+                )
+            else:
+                response = client.post(
+                    f"{self.base_url}/convert/html",
+                    content=html_content.encode("utf-8"),
+                    headers=self._request_headers(),
+                    params=query_params,
+                )
             response.raise_for_status()
             return response.content
