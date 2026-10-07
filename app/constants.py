@@ -21,6 +21,18 @@ WEASYPRINT_API_KEY: str = os.environ.get("WEASYPRINT_API_KEY", "").strip()
 JOB_STORAGE_DIR: str = os.environ.get("JOB_STORAGE_DIR") or str(pathlib.Path.home() / ".bulk-processing-service" / "jobs")
 JOB_TTL: str = os.environ.get("JOB_TTL", "24h")
 
+# Where Polarion publishes the keys its tokens are signed with, e.g. http://polarion/polarion/.well-known/jwks.json.
+# When set, every call for a merge job has to carry a token Polarion issued for it (X-Polarion-Token), and a job only
+# opens for the user it was started for. Off by default, so the service behaves as before.
+POLARION_JWKS_URL: str | None = os.environ.get("POLARION_JWKS_URL", "").strip() or None
+# The longest life, in seconds, a token may have been given: the tokens of the PDF Exporter live for minutes.
+# The host name to ask Polarion for its keys under, where the address in POLARION_JWKS_URL is not the one Polarion
+# knows itself by. Polarion answers a request only under the host name of its own base URL and refuses any other (400),
+# so a service which reaches it by the name of a container, an IP address or a proxy has to say whose key set it wants.
+# Not needed where POLARION_JWKS_URL is the base URL of Polarion.
+POLARION_JWKS_HOST: str | None = os.environ.get("POLARION_JWKS_HOST", "").strip() or None
+POLARION_TOKEN_MAX_AGE: int = int(os.environ.get("POLARION_TOKEN_MAX_AGE", "900"))
+
 DEBUG_DIR: str | None = os.environ.get("DEBUG_DIR")
 
 PORT: int = int(os.environ.get("PORT", "9070"))

@@ -36,6 +36,9 @@ docker run --detach \
 | `LOG_DIR` | `/opt/bulk-processing-service/logs` | Directory for log files |
 | `DEBUG_DIR` | — | If set, saves incoming HTML and converted PDFs into a `debug/` subdirectory inside each job's storage directory. Debug files are cleaned up automatically with the job by TTL cleanup |
 | `PORT` | `9070` | HTTP port |
+| `POLARION_JWKS_URL` | — | Where Polarion publishes the keys its tokens are signed with, e.g. `https://polarion/polarion/.well-known/jwks.json`. When set, every call for a merge job has to carry a [Polarion token](#polarion-token) |
+| `POLARION_JWKS_HOST` | — | The host name to ask Polarion for its keys under, where `POLARION_JWKS_URL` is not the base URL Polarion knows itself by (see [Polarion token](#polarion-token)) |
+| `POLARION_TOKEN_MAX_AGE` | `900` | The longest life, in seconds, a Polarion token may have been given; a token which lives longer is refused |
 | `API_KEY` | — | Enables [API key authentication](#api-key) when set. Comma-separated list allows several keys for rotation |
 
 TLS is configured through the `TLS_*` variables described under [HTTPS](#https).
@@ -82,6 +85,45 @@ Authentication is disabled by default. It activates when `API_KEY` holds at leas
 Only the merge endpoints under `/api/convert` are guarded. The `/health`, `/ready` and `/version` endpoints stay open, so probes keep working without a key. A missing or invalid key is answered with `401`.
 
 Since the key is a reusable credential, name the service with an `https` address where a key is configured, so it is not put on the wire in the clear.
+
+### Polarion token
+
+The service has no users of its own, so by default a merge job is protected by its ID alone. A client which runs inside
+Polarion, like the PDF Exporter, can instead prove who a job is made for with a token Polarion issues. Set
+`POLARION_JWKS_URL` to the key set Polarion publishes (`/polarion/.well-known/jwks.json`) and the service takes over the rest.
+Nothing is shared with Polarion: the service fetches its public keys, checks the signature of each token and trusts what
+is inside.
+
+The client sends a token in the `X-Polarion-Token` header of every call:
+
+| Claim | Meaning |
+|---|---|
+| `sub` | The Polarion user the merge is made for. The service keeps a SHA-256 of it as the initiator of the job |
+| `job` | The job the token is for. `start` has no job yet and carries none, every later call carries the ID it addresses |
+| `svc` | Must be `bulk-processing-service`, so a token made for another service is of no use here |
+| `exp`, `iat` | Both required. A token which lives longer than `POLARION_TOKEN_MAX_AGE` is refused |
+
+A job opens only for a token of its initiator which is made for that very job, so neither the ID of a job nor a token
+which leaks opens another one. Only `RS256` is accepted, whatever algorithm a token names.
+
+- A call without a valid token is answered with `401`, or with `503` where the key set cannot be fetched, since nothing can be
+  verified then.
+- A valid token which is not the one of the job's initiator, or is made for another job, is answered with `404`, exactly as for a
+  job which does not exist, so the answer does not tell which job IDs are in use.
+- Polarion publishes its keys with a private member, `"d": null`, which PyJWT would take for a private key and refuse the whole
+  set over. The service drops the private members of every key before it reads the set, since a verifier needs the public half only.
+- Polarion answers a request for its keys only under the host name of its own base URL, and refuses any other with `400`: a
+  service which reaches it by the name of a container, an IP address or a proxy gets nothing. Set `POLARION_JWKS_HOST` to that
+  name (for a Polarion whose base URL is `http://localhost`, `localhost`) and the service asks under it, whatever address it connects to.
+  Where `POLARION_JWKS_URL` is the base URL of Polarion, nothing needs to be set. A value which is not a host name stops the service from starting.
+- The key set is cached for five minutes. A signature which does not verify is checked once more against a fresh key set before
+  it is refused, because Polarion makes a new key when it restarts.
+- Jobs started while no token was required have no initiator and are closed once the check is switched on.
+- `/health`, `/ready` and `/version` need no token, and the [API key](#api-key) stays a layer of its own.
+
+Reach Polarion over `https` where you can: the keys are only as trustworthy as the way they are fetched. The server certificate
+is verified against the container's trust store, the same way as for the call to WeasyPrint, so a private CA is installed with
+`SSL_CERT_FILE`.
 
 ## Deployment Topology and Scaling
 

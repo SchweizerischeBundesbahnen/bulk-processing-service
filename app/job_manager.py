@@ -122,11 +122,11 @@ class JobManager:
         tmp_path.write_text(metadata.model_dump_json(), encoding="utf-8")
         tmp_path.replace(path)
 
-    def create_job(self, params: MergeJobStartParams) -> str:
+    def create_job(self, params: MergeJobStartParams, initiator_hash: str | None = None) -> str:
         job_id = uuid.uuid4().hex
         job_dir = self._job_dir(job_id)
         job_dir.mkdir(parents=True)
-        metadata = JobMetadata(job_id=job_id, status=JobStatus.ACTIVE, created_at=datetime.now(UTC), params=params)
+        metadata = JobMetadata(job_id=job_id, status=JobStatus.ACTIVE, created_at=datetime.now(UTC), params=params, initiator_hash=initiator_hash)
         self._write_metadata(job_id, metadata)
         return job_id
 
