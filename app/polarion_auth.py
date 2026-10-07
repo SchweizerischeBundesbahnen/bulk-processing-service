@@ -46,7 +46,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-POLARION_TOKEN_HEADER = "X-Polarion-Token"  # noqa: S105 - the name of a header, not a secret
+# the name of a header, not a secret
+POLARION_TOKEN_HEADER = "X-Polarion-Token"  # noqa: S105
 SERVICE_NAME = "bulk-processing-service"
 SERVICE_CLAIM = "svc"
 JOB_CLAIM = "job"
@@ -57,7 +58,7 @@ _ALGORITHMS = ["RS256"]
 _LEEWAY_SECONDS = 30
 # a host name, or an address, with a port where there is one: what a Host header holds, and nothing a header could be
 # broken out of with
-_HOST_PATTERN = re.compile(r"[A-Za-z0-9.\-]+(:[0-9]{1,5})?|\[[0-9A-Fa-f:.]+\](:[0-9]{1,5})?")
+_HOST_PATTERN = re.compile(r"[A-Za-z\d.\-]+(:\d{1,5})?|\[[\dA-Fa-f:.]+\](:\d{1,5})?", re.ASCII)
 _JWKS_CACHE_SECONDS = 300
 _JWKS_TIMEOUT_SECONDS = 5
 # a forced re-fetch of the key set (replaced key behind a known kid) is allowed this rarely,
@@ -243,7 +244,7 @@ def require_principal(
         logger.warning("Rejected request to %s: Polarion token refused (%s)", request.url.path, e)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Polarion token") from e
     except JwksUnavailableError as e:
-        logger.error("Cannot verify the Polarion token of a request to %s: key set unreachable (%s)", request.url.path, e)
+        logger.exception("Cannot verify the Polarion token of a request to %s: key set unreachable", request.url.path)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Cannot verify the Polarion token: its key set is unreachable") from e
 
 
