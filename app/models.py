@@ -60,5 +60,7 @@ class JobMetadata(BaseModel):
     updated_at: datetime | None = None
     completed_at: datetime | None = None
     params: MergeJobStartParams
+    # SHA-256 of the Polarion user the job was started for. None for a job started while no token was required.
+    initiator_hash: str | None = None
     pdf_count: int = 0
     failed_count: int = 0

@@ -13,6 +13,7 @@ dependencies = [
     "fastapi==0.142.2",
     "httpx==0.28.1",
     "pikepdf==10.16.0",
+    "pyjwt[crypto]==2.15.1",
     "pypdf==6.19.0",
     "python-multipart==0.0.32",
     "uvicorn==0.54.0",

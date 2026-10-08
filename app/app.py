@@ -36,6 +36,7 @@ from app.constants import (
 from app.converter_controller import router as converter_router
 from app.job_manager import JobManager
 from app.models import VersionInfo
+from app.polarion_auth import build_verifier
 from app.weasyprint_client import TLS_CONTEXT
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.job_manager = JobManager(JOB_STORAGE_DIR)
+    app.state.polarion_verifier = build_verifier()
     ttl = parse_ttl(JOB_TTL)
     task = asyncio.create_task(cleanup_expired_jobs(app.state.job_manager, ttl))
     yield

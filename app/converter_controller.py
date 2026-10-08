@@ -15,8 +15,9 @@ from starlette.datastructures import UploadFile
 from app.auth import require_api_key
 from app.constants import REQUEST_BODY_LIMIT, WEASYPRINT_API_KEY, WEASYPRINT_SERVICE_URL, WEASYPRINT_SERVICE_URL_DEFAULT, WEASYPRINT_TIMEOUT, sanitize_for_log
 from app.job_manager import JobManager
-from app.models import AddDocumentRequest, DocumentConversionParams, MergeJobStartParams
+from app.models import AddDocumentRequest, DocumentConversionParams, JobMetadata, MergeJobStartParams
 from app.pdf_merger import count_pdf_pages, replace_first_page_with_cover, resolve_cover_page_placeholders
+from app.polarion_auth import Principal, may_use_job, require_principal
 from app.weasyprint_client import Attachment, WeasyPrintClient
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,23 @@ def _get_job_manager(request: Request) -> JobManager:
 
 
 JobManagerDep = Annotated[JobManager, Depends(_get_job_manager)]
+PrincipalDep = Annotated[Principal | None, Depends(require_principal)]
+
+
+def _get_authorized_job(job_manager: JobManager, job_id: str, principal: Principal | None) -> JobMetadata:
+    """
+    Metadata of the job, if it exists and the verified token may be used for it.
+
+    A job of another user, or a token made for another job, is answered exactly like a job which does not exist, so a
+    caller cannot tell the two apart and learn which job IDs are in use.
+    """
+    try:
+        metadata = job_manager.get_job_metadata(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")  # noqa: B904
+    if metadata is None or not may_use_job(principal, job_id, metadata):
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    return metadata
 
 
 def get_weasyprint_client() -> WeasyPrintClient:
@@ -56,8 +74,8 @@ def _save_debug_file(job_manager: JobManager, job_id: str, doc_index: int, suffi
 
 
 @router.post("/start", status_code=201)
-def start_merge_job(params: MergeJobStartParams, job_manager: JobManagerDep) -> dict[str, str]:
-    job_id = job_manager.create_job(params)
+def start_merge_job(params: MergeJobStartParams, job_manager: JobManagerDep, principal: PrincipalDep) -> dict[str, str]:
+    job_id = job_manager.create_job(params, principal.user_hash if principal else None)
     logger.info("Started merge job '%s' with fileName='%s'", sanitize_for_log(job_id), sanitize_for_log(params.file_name))
     return {"jobId": job_id}
 
@@ -66,19 +84,21 @@ def start_merge_job(params: MergeJobStartParams, job_manager: JobManagerDep) -> 
     "/{job_id}/add",
     status_code=202,
     responses={
-        404: {"description": "Job not found"},
+        401: {"description": "Missing or invalid Polarion token (only when POLARION_JWKS_URL is configured)"},
+        404: {"description": "Job not found, or not the job this token is for"},
         409: {"description": "Job is not active"},
     },
 )
-def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobManagerDep) -> dict[str, str]:
-    return _add_document(job_id, job_manager, body)
+def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobManagerDep, principal: PrincipalDep) -> dict[str, str]:
+    return _add_document(job_id, job_manager, principal, body)
 
 
 @router.post(
     "/{job_id}/add-with-attachments",
     status_code=202,
     responses={
-        404: {"description": "Job not found"},
+        401: {"description": "Missing or invalid Polarion token (only when POLARION_JWKS_URL is configured)"},
+        404: {"description": "Job not found, or not the job this token is for"},
         409: {"description": "Job is not active"},
         422: {"description": "The form has no html field, or its params are not valid"},
     },
@@ -103,8 +123,10 @@ def add_document_to_job(job_id: str, body: AddDocumentRequest, job_manager: JobM
         }
     },
 )
-async def add_document_with_attachments_to_job(job_id: str, request: Request, job_manager: JobManagerDep) -> dict[str, str]:
+async def add_document_with_attachments_to_job(job_id: str, request: Request, job_manager: JobManagerDep, principal: PrincipalDep) -> dict[str, str]:
     """Add a document which embeds files, as PDF/A-4f requires. The cover page embeds none."""
+    # before the body is read: a job which is not this caller's is not worth a megabyte of form data
+    _get_authorized_job(job_manager, job_id, principal)
     # A form field is limited to 1 MB by default, less than the HTML of a large document; the body as a whole has its own limit
     async with request.form(max_part_size=REQUEST_BODY_LIMIT) as form:  # NOSONAR False positive - max_part_size is valid parameter
         html = form.get("html")
@@ -118,16 +140,11 @@ async def add_document_with_attachments_to_job(job_id: str, request: Request, jo
             raise HTTPException(status_code=422, detail=f"Form field 'params' is not valid: {e}") from e
         attachments = [Attachment(file.filename or "attachment", await file.read()) for file in form.getlist("files") if isinstance(file, UploadFile)]
     body = AddDocumentRequest(html=html, cover_page_html=cover_page_html if isinstance(cover_page_html, str) else None, params=params)
-    return await run_in_threadpool(_add_document, job_id, job_manager, body, attachments)
+    return await run_in_threadpool(_add_document, job_id, job_manager, principal, body, attachments)
 
 
-def _add_document(job_id: str, job_manager: JobManager, body: AddDocumentRequest, attachments: list[Attachment] | None = None) -> dict[str, str]:
-    try:
-        metadata = job_manager.get_job_metadata(job_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")  # noqa: B904
-    if metadata is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+def _add_document(job_id: str, job_manager: JobManager, principal: Principal | None, body: AddDocumentRequest, attachments: list[Attachment] | None = None) -> dict[str, str]:
+    _get_authorized_job(job_manager, job_id, principal)
 
     client = get_weasyprint_client()
     try:
@@ -168,17 +185,13 @@ def _add_document(job_id: str, job_manager: JobManager, body: AddDocumentRequest
 @router.post(
     "/{job_id}/finish",
     responses={
-        404: {"description": "Job not found"},
+        401: {"description": "Missing or invalid Polarion token (only when POLARION_JWKS_URL is configured)"},
+        404: {"description": "Job not found, or not the job this token is for"},
         400: {"description": "No documents to merge, or all documents failed"},
     },
 )
-def finish_merge_job(job_id: str, job_manager: JobManagerDep) -> FileResponse:
-    try:
-        metadata_before = job_manager.get_job_metadata(job_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")  # noqa: B904
-    if metadata_before is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+def finish_merge_job(job_id: str, job_manager: JobManagerDep, principal: PrincipalDep) -> FileResponse:
+    metadata_before = _get_authorized_job(job_manager, job_id, principal)
 
     if metadata_before.pdf_count == 0 and metadata_before.failed_count > 0:
         raise HTTPException(status_code=400, detail=f"All {metadata_before.failed_count} documents failed to convert")
@@ -213,14 +226,12 @@ def finish_merge_job(job_id: str, job_manager: JobManagerDep) -> FileResponse:
 @router.delete(
     "/{job_id}",
     status_code=204,
-    responses={404: {"description": "Job not found"}},
+    responses={
+        401: {"description": "Missing or invalid Polarion token (only when POLARION_JWKS_URL is configured)"},
+        404: {"description": "Job not found, or not the job this token is for"},
+    },
 )
-def delete_merge_job(job_id: str, job_manager: JobManagerDep) -> None:
-    try:
-        metadata = job_manager.get_job_metadata(job_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")  # noqa: B904
-    if metadata is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+def delete_merge_job(job_id: str, job_manager: JobManagerDep, principal: PrincipalDep) -> None:
+    _get_authorized_job(job_manager, job_id, principal)
     job_manager.delete_job(job_id)
     logger.info("Deleted merge job '%s'", sanitize_for_log(job_id))
