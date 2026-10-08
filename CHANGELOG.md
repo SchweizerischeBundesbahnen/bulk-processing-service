@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/compare/v1.2.0...v1.3.0) (2026-10-08)
+
+
+### Features
+
+* bind merge jobs to the Polarion user who started them ([#24](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/issues/24)) ([1ea6bd8](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/1ea6bd80e2bc376c0d9b3e80d68a6b2a915cc5e2)), closes [#23](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/issues/23)
+
+
+### Bug Fixes
+
+* **deps:** update dependency tox to v4.64.8 ([ff27ebb](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/ff27ebbf555bef19f2fd45f81a57b5d4a87da8eb))
+* **deps:** update python docker tag to v3.14.8 ([394d5ed](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/394d5ed024fd827247473c1a24355a1b877ca914))
+
 ## [1.2.0](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/compare/v1.1.0...v1.2.0) (2026-10-06)
 
 
