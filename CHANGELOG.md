@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.1](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/compare/v1.3.0...v1.3.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency tox to v4.64.9 ([b5e6243](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/b5e624348ee6b55bd171839d863ad37d6f80a15e))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.12.24 ([19c9508](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/19c9508cfc8021588866480347d2b4193d2f997e))
+* **deps:** update ghcr.io/astral-sh/uv docker tag to v0.13.0 ([87599e7](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/commit/87599e7c80dec8f4092fd462b4ce03605f8cacc6))
+
 ## [1.3.0](https://github.com/SchweizerischeBundesbahnen/bulk-processing-service/compare/v1.2.0...v1.3.0) (2026-10-08)
 
 
