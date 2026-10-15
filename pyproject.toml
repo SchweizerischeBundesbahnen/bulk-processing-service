@@ -12,7 +12,7 @@ requires-python = ">=3.14,<3.15"
 dependencies = [
     "fastapi==0.143.0",
     "httpx==0.28.1",
-    "pikepdf==10.16.0",
+    "pikepdf==10.17.0",
     "pyjwt[crypto]==2.15.1",
     "pypdf==6.20.0",
     "python-multipart==0.0.32",
