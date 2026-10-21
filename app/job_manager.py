@@ -17,7 +17,7 @@ from app.models import JobMetadata, JobStatus
 from app.pdf_merger import merge_pdf_files
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from app.models import MergeJobStartParams
 
@@ -71,7 +71,7 @@ class JobManager:
         return self._job_dir(job_id) / METADATA_FILE
 
     @contextmanager
-    def _job_lock(self, job_id: str) -> Iterator[None]:
+    def _job_lock(self, job_id: str) -> Generator[None]:
         thread_lock = self._thread_lock(job_id)
         thread_lock.acquire()
         try:
@@ -87,7 +87,7 @@ class JobManager:
             thread_lock.release()
 
     @contextmanager
-    def _try_job_lock(self, job_id: str) -> Iterator[bool]:
+    def _try_job_lock(self, job_id: str) -> Generator[bool]:
         thread_lock = self._thread_lock(job_id)
         if not thread_lock.acquire(blocking=False):
             # Another thread of this replica holds the job; treat it as busy.
