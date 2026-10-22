@@ -160,7 +160,7 @@ class PolarionTokenVerifier:
         except (jwt.PyJWKClientConnectionError, ValueError) as e:
             raise JwksUnavailableError(type(e).__name__) from e
         # an unknown kid is looked up once more in a fresh set by the client itself
-        return jwt.decode(  # type: ignore[no-any-return]
+        return jwt.decode(
             token,
             key.key,
             algorithms=_ALGORITHMS,

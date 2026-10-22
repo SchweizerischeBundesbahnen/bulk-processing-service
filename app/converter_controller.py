@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/convert", dependencies=[Depends(require_api_key)
 
 
 def _get_job_manager(request: Request) -> JobManager:
-    return request.app.state.job_manager  # type: ignore[no-any-return]
+    return request.app.state.job_manager
 
 
 JobManagerDep = Annotated[JobManager, Depends(_get_job_manager)]

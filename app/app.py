@@ -18,7 +18,7 @@ from starlette.datastructures import Headers
 from starlette.responses import PlainTextResponse
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.job_manager = JobManager(JOB_STORAGE_DIR)
     app.state.polarion_verifier = build_verifier()
     ttl = parse_ttl(JOB_TTL)

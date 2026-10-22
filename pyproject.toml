@@ -27,7 +27,7 @@ Repository = "https://github.com/SchweizerischeBundesbahnen/bulk-processing-serv
 dev = [
     "pre-commit==4.7.0",
     "ruff==0.17.1",
-    "mypy==2.4.0",
+    "ty==0.0.89",
 ]
 
 test = [
@@ -73,7 +73,11 @@ extend-select = [
     "SIM",    # flake8-simplify
     "T20",    # flake8-print
     "ERA",    # eradicate
+    "ANN",    # flake8-annotations: replaces mypy disallow_untyped_defs now that type checking is done by ty
 ]
+
+# Any is correct at JSON and **kwargs boundaries
+ignore = ["ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
@@ -84,7 +88,14 @@ extend-select = [
 [tool.ruff.format]
 line-ending = "lf"
 
-[tool.mypy]
-explicit_package_bases = true
-disallow_untyped_defs = true
-exclude = "tests/.*"
+[tool.ty.src]
+exclude = ["tests/"]
+
+[tool.ty.terminal]
+# Fail on warning-level diagnostics too, as mypy did, so the gate does not depend on the ty default.
+error-on-warning = true
+
+[tool.ty.rules]
+unused-ignore-comment = "error"  # a stale "# ty: ignore" fails the check
+
+# ty has no disallow_untyped_defs equivalent: missing annotations are enforced by ruff's ANN rules (see [tool.ruff.lint] extend-select).
