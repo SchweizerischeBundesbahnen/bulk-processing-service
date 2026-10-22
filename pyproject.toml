@@ -96,6 +96,6 @@ exclude = ["tests/"]
 error-on-warning = true
 
 [tool.ty.rules]
-unused-ignore-comment = "error"  # mypy's warn_unused_ignores: a stale "# ty: ignore" fails the check
+unused-ignore-comment = "error"  # a stale "# ty: ignore" fails the check
 
-# ty has no disallow_untyped_defs equivalent: missing annotations are enforced by ruff's ANN rules (select = ["ALL"]).
+# ty has no disallow_untyped_defs equivalent: missing annotations are enforced by ruff's ANN rules (see [tool.ruff.lint] extend-select).
