@@ -216,7 +216,6 @@ Request:
   "params": {
     "presentationalHints": true,
     "pdfVariant": "pdf/a-2b",
-    "scaleFactor": "2",
     "customMetadata": false,
     "fullFonts": false
   }
