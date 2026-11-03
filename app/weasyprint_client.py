@@ -55,8 +55,6 @@ class WeasyPrintClient:
         }
         if params.pdf_variant:
             query_params["pdf_variant"] = params.pdf_variant
-        if params.scale_factor:
-            query_params["scale_factor"] = params.scale_factor
 
         with httpx.Client(timeout=self.timeout, verify=TLS_CONTEXT) as client:
             if attachments:
