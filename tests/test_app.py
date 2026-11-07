@@ -152,7 +152,7 @@ class TestAddDocumentToJob:
 
     @patch("app.converter_controller.get_weasyprint_client")
     def test_add_document_uses_per_doc_params(self, mock_get_client, client):
-        """T1: per-document params (scaleFactor, customMetadata) are forwarded to WeasyPrint, not job-level params."""
+        """T1: per-document params (fullFonts, customMetadata) are forwarded to WeasyPrint, not job-level params."""
         mock_client = mock_get_client.return_value
         mock_client.convert_html_to_pdf.return_value = SAMPLE_PDF
 
@@ -162,7 +162,7 @@ class TestAddDocumentToJob:
             f"/api/convert/{job_id}/add",
             json={
                 "html": "<html></html>",
-                "params": {"scaleFactor": "3", "customMetadata": True, "pdfVariant": "pdf/a-1b"},
+                "params": {"fullFonts": True, "customMetadata": True, "pdfVariant": "pdf/a-1b"},
             },
         )
         assert response.status_code == 202
@@ -170,7 +170,7 @@ class TestAddDocumentToJob:
         # Verify WeasyPrint was called with per-doc params, not defaults
         call_args = mock_client.convert_html_to_pdf.call_args
         doc_params = call_args.args[1]
-        assert doc_params.scale_factor == "3"
+        assert doc_params.full_fonts is True
         assert doc_params.custom_metadata is True
         assert doc_params.pdf_variant == "pdf/a-1b"
 
@@ -236,7 +236,7 @@ class TestAddDocumentWithAttachmentsToJob:
         response = self._add(
             client,
             job_id,
-            {"html": "<html>content</html>", "params": '{"pdfVariant": "pdf/a-4f", "scaleFactor": "2"}'},
+            {"html": "<html>content</html>", "params": '{"pdfVariant": "pdf/a-4f", "fullFonts": true}'},
             [("files", ("notes.txt", b"notes")), ("files", ("data.csv", b"a,b"))],
         )
 
@@ -244,7 +244,7 @@ class TestAddDocumentWithAttachmentsToJob:
         assert response.json() == {"status": "accepted"}
         html, params, attachments = mock_client.convert_html_to_pdf.call_args.args
         assert html == "<html>content</html>"
-        assert (params.pdf_variant, params.scale_factor) == ("pdf/a-4f", "2")
+        assert (params.pdf_variant, params.full_fonts) == ("pdf/a-4f", True)
         assert attachments == [Attachment("notes.txt", b"notes"), Attachment("data.csv", b"a,b")]
         assert _job_manager().get_job_metadata(job_id).pdf_count == 1
 
