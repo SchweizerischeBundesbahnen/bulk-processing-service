@@ -52,13 +52,13 @@ class TestWeasyPrintClient:
         mock_http_client.__exit__ = MagicMock(return_value=False)
         mock_client_cls.return_value = mock_http_client
 
-        params = DocumentConversionParams(pdf_variant="pdf/a-2b", scale_factor="2", presentational_hints=True)
+        params = DocumentConversionParams(pdf_variant="pdf/a-2b", presentational_hints=True)
         client.convert_html_to_pdf("<html></html>", params)
 
         call_kwargs = mock_http_client.post.call_args
         query_params = call_kwargs.kwargs["params"]
         assert query_params["pdf_variant"] == "pdf/a-2b"
-        assert query_params["scale_factor"] == "2"
+        assert "scale_factor" not in query_params
         assert query_params["presentational_hints"] is True
 
     @patch("app.weasyprint_client.httpx.Client")

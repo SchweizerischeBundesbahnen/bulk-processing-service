@@ -22,23 +22,22 @@ class TestDocumentConversionParams:
         assert params.media_type == "print"
         assert params.presentational_hints is False
         assert params.base_url is None
-        assert params.scale_factor is None
         assert params.pdf_variant is None
         assert params.custom_metadata is False
         assert params.full_fonts is False
 
     def test_camel_case_aliases(self):
-        params = DocumentConversionParams.model_validate({
-            "mediaType": "screen",
-            "presentationalHints": True,
-            "scaleFactor": "2",
-            "pdfVariant": "pdf/a-2b",
-            "customMetadata": True,
-            "fullFonts": True,
-        })
+        params = DocumentConversionParams.model_validate(
+            {
+                "mediaType": "screen",
+                "presentationalHints": True,
+                "pdfVariant": "pdf/a-2b",
+                "customMetadata": True,
+                "fullFonts": True,
+            }
+        )
         assert params.media_type == "screen"
         assert params.presentational_hints is True
-        assert params.scale_factor == "2"
         assert params.pdf_variant == "pdf/a-2b"
         assert params.custom_metadata is True
         assert params.full_fonts is True
@@ -52,9 +51,15 @@ class TestAddDocumentRequest:
         assert req.params.encoding == "utf-8"
 
     def test_with_params(self):
-        req = AddDocumentRequest.model_validate({
-            "html": "<html></html>",
-            "params": {"presentationalHints": True, "scaleFactor": "3"},
-        })
+        req = AddDocumentRequest.model_validate(
+            {
+                "html": "<html></html>",
+                "params": {"presentationalHints": True},
+            }
+        )
         assert req.params.presentational_hints is True
-        assert req.params.scale_factor == "3"
+
+    def test_accepts_the_scale_factor_of_older_clients(self):
+        """weasyprint-service no longer takes a scale factor, so it is read and dropped, never refused."""
+        req = AddDocumentRequest.model_validate({"html": "<html></html>", "params": {"scaleFactor": "3"}})
+        assert "scale_factor" not in req.params.model_dump()

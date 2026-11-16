@@ -20,7 +20,6 @@ class DocumentConversionParams(BaseModel):
     media_type: str = "print"
     presentational_hints: bool = False
     base_url: str | None = None
-    scale_factor: str | None = None
     pdf_variant: str | None = None
     custom_metadata: bool = False
     full_fonts: bool = False
