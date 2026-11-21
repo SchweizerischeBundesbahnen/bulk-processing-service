@@ -14,7 +14,7 @@ dependencies = [
     "httpx==0.28.1",
     "pikepdf==10.18.2",
     "pyjwt[crypto]==2.15.1",
-    "pypdf==7.1.0",
+    "pypdf==7.1.1",
     "python-multipart==0.0.34",
     "uvicorn==0.54.0",
 ]
